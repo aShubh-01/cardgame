@@ -147,17 +147,16 @@ export function calculateBlackjackRound({
       p.balance = Math.max(0, (p.balance || 0) + totalNet);
     }
 
-    // Debt management between player and dealer/banker
-    if (dealerPlayerId !== 'house') {
-      if (totalNet > 0) {
-        // Dealer owes player
-        const debtKey = `${dealerPlayerId}|${pInput.playerId}`;
-        debtsDelta[debtKey] = totalNet;
-      } else if (totalNet < 0) {
-        // Player owes dealer
-        const debtKey = `${pInput.playerId}|${dealerPlayerId}`;
-        debtsDelta[debtKey] = -totalNet;
-      }
+    // Debt management between player and dealer/banker (including 'house' if designated)
+    const effectiveDealerId = dealerPlayerId || 'house';
+    if (totalNet > 0) {
+      // Dealer owes player
+      const debtKey = `${effectiveDealerId}|${pInput.playerId}`;
+      debtsDelta[debtKey] = (debtsDelta[debtKey] || 0) + totalNet;
+    } else if (totalNet < 0) {
+      // Player owes dealer
+      const debtKey = `${pInput.playerId}|${effectiveDealerId}`;
+      debtsDelta[debtKey] = (debtsDelta[debtKey] || 0) + -totalNet;
     }
   });
 

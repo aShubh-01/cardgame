@@ -62,12 +62,20 @@ export function calculatePots(
   folded: Record<string, any> | string[] | Set<string> = []
 ): PotCalculationResult {
   const foldedSet = normalizeFolded(folded);
+  const seedAmount = Math.max(0, Number(contributions['__pot_seed__'] || 0));
 
-  // Filter out non-positive contributions
-  const validEntries = Object.entries(contributions).filter(([, amt]) => (amt || 0) > 0);
-  const totalPot = validEntries.reduce((sum, [, amt]) => sum + amt, 0);
+  // Filter out non-positive player contributions (excluding __pot_seed__)
+  const validEntries = Object.entries(contributions).filter(
+    ([id, amt]) => id !== '__pot_seed__' && (amt || 0) > 0
+  );
+  const playerTotalPot = validEntries.reduce((sum, [, amt]) => sum + amt, 0);
+  const totalPot = playerTotalPot + seedAmount;
 
-  if (validEntries.length === 0 || totalPot === 0) {
+  const allNonFoldedPlayers = Object.keys(contributions).filter(
+    id => id !== '__pot_seed__' && !foldedSet.has(id)
+  );
+
+  if (totalPot === 0) {
     return {
       pots: [
         {
@@ -80,6 +88,22 @@ export function calculatePots(
         },
       ],
       totalPot: 0,
+    };
+  }
+
+  if (validEntries.length === 0 && seedAmount > 0) {
+    return {
+      pots: [
+        {
+          id: 'main',
+          name: 'Main Pot',
+          amount: seedAmount,
+          eligiblePlayerIds: allNonFoldedPlayers,
+          contributorIds: ['__pot_seed__'],
+          tierCap: 0,
+        },
+      ],
+      totalPot: seedAmount,
     };
   }
 
@@ -186,6 +210,16 @@ export function calculatePots(
       eligiblePlayerIds: [],
       contributorIds: validEntries.map(([id]) => id),
       tierCap: levels[levels.length - 1] || 0,
+    });
+  }
+
+  // Add Admin-seeded initial pot (if any) to Main Pot
+  if (seedAmount > 0 && consolidated.length > 0) {
+    consolidated[0].amount += seedAmount;
+    allNonFoldedPlayers.forEach(id => {
+      if (!consolidated[0].eligiblePlayerIds.includes(id)) {
+        consolidated[0].eligiblePlayerIds.push(id);
+      }
     });
   }
 

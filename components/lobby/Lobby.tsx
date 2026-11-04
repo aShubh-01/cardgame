@@ -1,21 +1,30 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Header from '@/components/common/Header';
 import SessionsModal from '@/components/common/SessionsModal';
+import JoinRoomModal from '@/components/common/JoinRoomModal';
 import GoogleConfigModal from '@/components/common/GoogleConfigModal';
 import { useGameEngine } from '@/hooks/useGameEngine';
 
 export default function Lobby() {
-  React.useEffect(() => {
+  const engine = useGameEngine(null);
+  const [modalGameFilter, setModalGameFilter] = useState<'all' | 'tp' | 'pk' | 'rummy' | 'bj'>('all');
+
+  useEffect(() => {
     document.body.dataset.v = 'lobby';
+    // Auto-open Join Modal if ?join=CODE in URL
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const joinCode = params.get('join');
+      if (joinCode) {
+        engine.setShowJoinRoomModal(true);
+      }
+    }
     return () => {
       delete document.body.dataset.v;
     };
   }, []);
-
-  const engine = useGameEngine(null);
-  const [modalGameFilter, setModalGameFilter] = useState<'all' | 'tp' | 'pk' | 'rummy' | 'bj'>('all');
 
   const openSessionsForGame = (g: 'all' | 'tp' | 'pk' | 'rummy' | 'bj') => {
     setModalGameFilter(g);
@@ -46,11 +55,14 @@ export default function Lobby() {
         title="♠ CARD ROOM ♥ PICK YOUR GAME"
         currentGame={null}
         onOpenSessions={() => openSessionsForGame('all')}
+        onOpenJoinRoom={() => engine.setShowJoinRoomModal(true)}
         onGoogleSignIn={engine.handleGoogleSignIn}
       />
 
       <div id="lobby">
-        <div className="lt">CHOOSE YOUR TABLE</div>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginBottom: 25 }}>
+          <div className="lt" style={{ margin: 0 }}>CHOOSE YOUR TABLE</div>
+        </div>
 
         <div className="gg">
           {/* Teen Patti Card */}
@@ -244,6 +256,16 @@ export default function Lobby() {
           onClose={() => engine.setShowSessionModal(false)}
           onSwitchSession={engine.switchSession}
           onCreateSession={engine.createSession}
+        />
+      )}
+
+      {/* Join Online Room Modal */}
+      {engine.showJoinRoomModal && (
+        <JoinRoomModal
+          onClose={() => engine.setShowJoinRoomModal(false)}
+          onJoinSuccess={(sess) => {
+            engine.switchSession(sess._id);
+          }}
         />
       )}
 

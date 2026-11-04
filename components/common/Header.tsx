@@ -1,16 +1,18 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { useSession, signOut } from 'next-auth/react';
-import { GType } from '@/types/game';
+import { GType, SessionDoc } from '@/types/game';
 
 interface HeaderProps {
   title: string;
   roundTag?: string;
   sessionName?: string;
   currentGame: GType;
+  sessionDoc?: SessionDoc | null;
   onOpenSessions: () => void;
+  onOpenJoinRoom?: () => void;
   onResetGame?: () => void;
   onGoogleSignIn: () => void;
 }
@@ -20,11 +22,25 @@ export default function Header({
   roundTag,
   sessionName,
   currentGame,
+  sessionDoc,
   onOpenSessions,
+  onOpenJoinRoom,
   onResetGame,
   onGoogleSignIn,
 }: HeaderProps) {
   const { data: session } = useSession();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyLink = () => {
+    if (!sessionDoc?.roomCode) return;
+    const url = `${window.location.origin}/?join=${sessionDoc.roomCode}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      prompt('Copy this room code:', sessionDoc.roomCode);
+    });
+  };
 
   return (
     <header>
@@ -38,7 +54,72 @@ export default function Header({
         <span className="tag" id="rn">{roundTag}</span>
       )}
 
+      {/* Online Room Code Pill */}
+      {sessionDoc?.sessionMode === 'online' && sessionDoc?.roomCode && (
+        <div>
+          {sessionDoc.roomCode && (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '4px 12px',
+                background: 'rgba(15, 23, 42, 0.7)',
+                border: '1px solid rgba(56, 189, 248, 0.4)',
+                borderRadius: 6,
+                fontFamily: 'monospace',
+                fontSize: 12,
+                fontWeight: 900,
+                color: '#38bdf8',
+                letterSpacing: '0.15em',
+              }}
+            >
+              <span>Room Code: {sessionDoc.roomCode}</span>
+              <button
+                type="button"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#94a3b8',
+                  fontSize: 11,
+                  padding: 0,
+                }}
+                onClick={() => {
+                  if (typeof navigator !== 'undefined') {
+                    navigator.clipboard.writeText(sessionDoc?.roomCode || '');
+                  }
+                }}
+                title="Copy Room Code"
+              >
+                📋
+              </button>
+            </div>
+          )}
+        </div>
+
+      )}
+
       <span className="sp"></span>
+
+      {/* Join Online Room Button */}
+      {onOpenJoinRoom && (
+        <button
+          type="button"
+          className="sm"
+          onClick={onOpenJoinRoom}
+          title="Join an online multiplayer room"
+          style={{
+            background: 'rgba(56, 189, 248, 0.12)',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
+            color: '#38bdf8',
+            fontWeight: 700,
+            fontSize: 11,
+          }}
+        >
+          🌐 Join Room
+        </button>
+      )}
 
       {/* Sessions badge */}
       <button

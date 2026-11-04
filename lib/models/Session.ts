@@ -11,6 +11,15 @@ const SessionSchema = new mongoose.Schema({
     mode: { type: String, default: 'each' },
     amt: { type: Number, default: 100 }
   },
+  sessionMode: { type: String, enum: ['tracker', 'online'], default: 'tracker' },
+  roomCode: { type: String, default: null },
+  hostUserId: { type: String, default: null },
+  gameOperatorUserId: { type: String, default: null },
+  nextGameOperatorUserId: { type: String, default: null },
+  goLastHeartbeat: { type: Number, default: 0 },
+  goDisconnectEvent: { type: mongoose.Schema.Types.Mixed, default: null },
+  readyPlayers: { type: Object, default: {} },
+  activityLog: { type: Array, default: [] },
   balanceMode: { type: Boolean, default: false },
   defaultBuyIn: { type: Number, default: 1000 },
   round: { type: mongoose.Schema.Types.Mixed, default: null },
@@ -24,7 +33,13 @@ const SessionSchema = new mongoose.Schema({
     total: { type: Number, default: 0 },
     big: { type: Number, default: 0 }
   },
-  rummyConfig: { type: mongoose.Schema.Types.Mixed, default: null }
+  rummyConfig: { type: mongoose.Schema.Types.Mixed, default: null },
+  dealerIdx: { type: Number, default: 0 },
+  chipRequests: { type: Array, default: [] },
+  dealerRequests: { type: Array, default: [] },
+  chatMessages: { type: Array, default: [] },
+  bjDealerId: { type: String, default: null },
+  bjDealerRotation: { type: Boolean, default: false }
 }, { timestamps: true, minimize: false });
 
 SessionSchema.index({ userId: 1, gameType: 1 });

@@ -9,6 +9,9 @@ import SessionsModal from '@/components/common/SessionsModal';
 import AddMoneyModal from '@/components/common/AddMoneyModal';
 import GoogleConfigModal from '@/components/common/GoogleConfigModal';
 import ConfirmModal from '@/components/common/ConfirmModal';
+import JoinRoomModal from '@/components/common/JoinRoomModal';
+import OperatorModals from '@/components/common/OperatorModals';
+import RoomCodeBanner from '@/components/common/RoomCodeBanner';
 import BlackjackTable from '@/components/blackjack/BlackjackTable';
 import BlackjackControls from '@/components/blackjack/BlackjackControls';
 import { useGameEngine } from '@/hooks/useGameEngine';
@@ -25,26 +28,69 @@ export default function BlackjackGame() {
   const engine = useGameEngine('bj');
   const { gameState, updateState } = engine;
   const rd = gameState.round;
+  const sessionMode = engine.currentSessionDoc?.sessionMode || 'tracker';
+  const isOnline = sessionMode === 'online';
 
-  const [dealerPlayerId, setDealerPlayerId] = useState<string | 'house'>('house');
+  const myEmail = engine.authSession?.user?.email;
+  const myPlayer = gameState.players.find(
+    p => p.userId && p.userId.toLowerCase() === myEmail?.toLowerCase()
+  );
+  const isHost =
+    sessionMode !== 'online'
+      ? true
+      : gameState.isGameOperator !== undefined
+      ? Boolean(gameState.isGameOperator)
+      : Boolean(
+          myEmail &&
+            (engine.currentSessionDoc?.gameOperatorUserId || engine.currentSessionDoc?.hostUserId)?.toLowerCase() ===
+              myEmail.toLowerCase()
+        );
 
-  const handleStartHand = () => {
+  const seatedPlayers = gameState.players.filter(p => !p.sit && !p.isGameOperator);
+  const dealerPlayerId: string | 'house' =
+    (rd?.dealer as string) ||
+    gameState.bjDealerId ||
+    (seatedPlayers.length >= 2 ? seatedPlayers[0].id : 'house');
+  const bjDealerRotation = Boolean(gameState.bjDealerRotation);
+
+  const handleSetDealerPlayerId = (id: string | 'house') => {
+    engine.setBjDealer(id, undefined);
+  };
+
+  const handleSetDealerRotation = (rot: boolean) => {
+    engine.setBjDealer(undefined, rot);
+  };
+
+  const handleStartHand = (defaultBet = 100) => {
+    if (isOnline && engine.sessionId) {
+      engine.sendMultiplayerAction('START_ROUND', { defaultBet });
+      return;
+    }
+
     updateState(prev => {
-      const activePlayers = prev.players.filter(p => !p.sit);
+      const allSeated = prev.players.filter(p => !p.sit);
+      const effDealer =
+        prev.bjDealerId || (allSeated.length >= 2 ? allSeated[0].id : 'house');
+      const activePlayers =
+        effDealer !== 'house' && allSeated.length >= 2
+          ? allSeated.filter(p => p.id !== effDealer)
+          : allSeated;
       if (activePlayers.length < 1) return prev;
 
       const rno = prev.rno + 1;
       return {
         ...prev,
+        bjDealerId: effDealer,
         rno,
         round: {
           no: rno,
           phase: 'hand',
+          dealer: effDealer,
           parts: activePlayers.map(p => p.id),
-          contrib: {},
+          contrib: Object.fromEntries(activePlayers.map(p => [p.id, defaultBet])),
           folded: {},
           turn: activePlayers[0].id,
-          stake: 100,
+          stake: defaultBet,
           stack: [],
           log: [`Hand #${rno} dealing commenced`],
           lastBy: '',
@@ -56,7 +102,17 @@ export default function BlackjackGame() {
     });
   };
 
+  const handleBjAction = (subAction: 'hit' | 'stand' | 'double') => {
+    if (isOnline && engine.sessionId) {
+      engine.sendMultiplayerAction('BJ_ACTION', { subAction });
+    }
+  };
+
   const handleAbortHand = () => {
+    if (isOnline && engine.sessionId) {
+      engine.abortRound();
+      return;
+    }
     updateState(prev => ({
       ...prev,
       round: null,
@@ -107,6 +163,9 @@ export default function BlackjackGame() {
       winningPlayers.forEach(([pId, r]) => {
         wins[pId] = (wins[pId] || 0) + r.totalNet;
       });
+      if (dealerPlayerId !== 'house' && res.dealerNet > 0) {
+        wins[dealerPlayerId] = (wins[dealerPlayerId] || 0) + res.dealerNet;
+      }
 
       const dealerName = dealerPlayerId === 'house'
         ? 'Casino House'
@@ -133,9 +192,19 @@ export default function BlackjackGame() {
         ...prev.hist,
       ].slice(0, 30);
 
+      let nextDealerId = prev.bjDealerId || dealerPlayerId;
+      if (prev.bjDealerRotation) {
+        const eligible = res.updatedPlayers.filter(p => !p.sit && !p.isGameOperator);
+        if (eligible.length >= 2) {
+          const curIdx = eligible.findIndex(p => p.id === dealerPlayerId);
+          nextDealerId = eligible[(curIdx + 1) % eligible.length].id;
+        }
+      }
+
       return {
         ...prev,
         players: res.updatedPlayers,
+        bjDealerId: nextDealerId,
         debts,
         wins,
         tot,
@@ -168,9 +237,25 @@ export default function BlackjackGame() {
         roundTag={roundTag}
         currentGame="bj"
         sessionName={engine.sessionName}
+        sessionDoc={engine.currentSessionDoc}
         onOpenSessions={() => engine.setShowSessionModal(true)}
+        onOpenJoinRoom={() => engine.setShowJoinRoomModal(true)}
         onGoogleSignIn={engine.handleGoogleSignIn}
         onResetGame={engine.resetGame}
+      />
+
+      <OperatorModals
+        gameState={gameState}
+        isOnlineMode={isOnline}
+        actionError={engine.actionError}
+        onClearError={() => engine.setActionError(null)}
+        showOperatorModal={engine.showOperatorModal}
+        setShowOperatorModal={engine.setShowOperatorModal}
+        onTransferGo={engine.transferGameOperator}
+        onVolunteerGo={engine.volunteerGameOperator}
+        onTriggerDisconnect={engine.triggerGoDisconnect}
+        onCheckTimeout={engine.checkGoTimeout}
+        onOpenDebtModal={() => engine.setShowDebtModal(true)}
       />
 
       <main id="app">
@@ -182,8 +267,16 @@ export default function BlackjackGame() {
           totalStats={gameState.tot}
           playerWins={gameState.wins}
           debts={gameState.debts}
+          sessionMode={sessionMode}
+          roomCode={engine.currentSessionDoc?.roomCode}
+          myPlayerId={myPlayer?.id}
+          isHost={isHost}
+          readyPlayers={gameState.readyPlayers}
+          chipRequests={gameState.chipRequests}
+          onResolveChipRequest={engine.resolveChipRequest}
           onAddPlayer={engine.addPlayer}
           onRemovePlayer={engine.removePlayer}
+          onRenamePlayer={engine.renamePlayer}
           onSitToggle={engine.toggleSit}
           onShuffle={engine.shufflePlayers}
           onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
@@ -197,10 +290,15 @@ export default function BlackjackGame() {
             round={rd}
             balanceMode={gameState.balanceMode}
             dealerPlayerId={dealerPlayerId}
+            myPlayerId={myPlayer?.id || null}
+            sessionMode={sessionMode}
+            isHost={isHost}
             onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
           />
           <div className="mut" style={{ textAlign: 'center', marginTop: 6 }} id="hint">
-            Offline Blackjack 21 · Record player bets, wins, losses, splits, doubles &amp; insurance.
+            {isOnline
+              ? 'Online Virtual Blackjack 21 · Dealer draws to 16 & stands on 17 · Hit, Stand or Double Down on your turn.'
+              : 'Offline Blackjack 21 · Record player bets, wins, losses, splits, doubles & insurance.'}
           </div>
         </section>
 
@@ -210,10 +308,23 @@ export default function BlackjackGame() {
           balanceMode={gameState.balanceMode}
           defaultBuyIn={gameState.defaultBuyIn}
           dealerPlayerId={dealerPlayerId}
-          onSetDealerPlayerId={setDealerPlayerId}
+          nextDealerPlayerId={gameState.bjDealerId || dealerPlayerId}
+          bjDealerRotation={bjDealerRotation}
+          dealerRequests={gameState.dealerRequests || []}
+          sessionMode={sessionMode}
+          isHost={isHost}
+          myPlayerId={myPlayer?.id || null}
+          readyPlayers={gameState.readyPlayers}
+          onToggleReady={engine.toggleReady}
+          onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
+          onSetDealerPlayerId={handleSetDealerPlayerId}
+          onSetDealerRotation={handleSetDealerRotation}
+          onRequestDealer={engine.requestBjDealer}
+          onResolveDealerRequest={engine.resolveBjDealerRequest}
           onSetDefaultBuyIn={engine.setDefaultBuyIn}
           onResetAllBalances={engine.resetAllBalances}
           onStartHand={handleStartHand}
+          onBjAction={handleBjAction}
           onSettleHand={handleSettleHand}
           onAbortHand={handleAbortHand}
         />
@@ -238,6 +349,8 @@ export default function BlackjackGame() {
         <DebtModal
           players={gameState.players}
           debts={gameState.debts}
+          myPlayerId={myPlayer?.id || null}
+          isHost={isHost}
           onClose={() => engine.setShowDebtModal(false)}
           onSettle={engine.settleDebt}
           onSettleAll={engine.settleAllDebts}
@@ -255,7 +368,17 @@ export default function BlackjackGame() {
         />
       )}
 
-      {engine.sessionsLoaded && !engine.sessionId && !engine.showSessionModal && (
+      {/* Join Online Room Modal */}
+      {engine.showJoinRoomModal && (
+        <JoinRoomModal
+          onClose={() => engine.setShowJoinRoomModal(false)}
+          onJoinSuccess={(sess) => {
+            engine.switchSession(sess._id);
+          }}
+        />
+      )}
+
+      {engine.sessionsLoaded && !engine.sessionId && !engine.showSessionModal && !(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('session')) && (
         <div className="mdl">
           <div className="session-modal-box" style={{ maxWidth: 460, textAlign: 'center', padding: '36px 24px' }}>
             <div style={{ fontSize: 44, marginBottom: 12 }}>♦</div>
@@ -288,9 +411,14 @@ export default function BlackjackGame() {
           <AddMoneyModal
             player={p}
             defaultBuyIn={gameState.defaultBuyIn}
+            sessionMode={sessionMode}
+            isHost={isHost}
+            chipRequests={gameState.chipRequests}
             onClose={() => engine.setAddMoneyTarget(null)}
             onAdjustMoney={engine.adjustMoney}
             onSetExactStack={engine.setPlayerBalance}
+            onRequestChips={engine.requestChips}
+            onResolveChipRequest={engine.resolveChipRequest}
           />
         );
       })()}

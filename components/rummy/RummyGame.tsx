@@ -9,6 +9,8 @@ import SessionsModal from '@/components/common/SessionsModal';
 import AddMoneyModal from '@/components/common/AddMoneyModal';
 import GoogleConfigModal from '@/components/common/GoogleConfigModal';
 import ConfirmModal from '@/components/common/ConfirmModal';
+import JoinRoomModal from '@/components/common/JoinRoomModal';
+import OperatorModals from '@/components/common/OperatorModals';
 import RummyTable from '@/components/rummy/RummyTable';
 import RummyControls from '@/components/rummy/RummyControls';
 import RummyConfigModal from '@/components/rummy/RummyConfigModal';
@@ -32,6 +34,22 @@ export default function RummyGame() {
   const { gameState, updateState } = engine;
   const rd = gameState.round;
 
+  const myEmail = engine.authSession?.user?.email;
+  const myPlayer = gameState.players.find(
+    p => p.userId && p.userId.toLowerCase() === myEmail?.toLowerCase()
+  );
+  const sessionMode = engine.currentSessionDoc?.sessionMode || 'tracker';
+  const isHost =
+    sessionMode !== 'online'
+      ? true
+      : gameState.isGameOperator !== undefined
+      ? Boolean(gameState.isGameOperator)
+      : Boolean(
+          myEmail &&
+            (engine.currentSessionDoc?.gameOperatorUserId || engine.currentSessionDoc?.hostUserId)?.toLowerCase() ===
+              myEmail.toLowerCase()
+        );
+
   const [pointValue, setPointValue] = useState<number>(10);
   const [cumulativePoints, setCumulativePoints] = useState<Record<string, number>>({});
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
@@ -40,6 +58,11 @@ export default function RummyGame() {
     (gameState as any).rummyConfig || DEFAULT_RUMMY_CONFIG;
 
   const handleStartDeal = () => {
+    if (sessionMode === 'online') {
+      engine.sendMultiplayerAction('START_ROUND', { pointValue });
+      return;
+    }
+
     updateState(prev => {
       const activePlayers = prev.players.filter(p => !p.sit);
       if (activePlayers.length < 2) return prev;
@@ -70,11 +93,27 @@ export default function RummyGame() {
   };
 
   const handleAbortDeal = () => {
+    if (sessionMode === 'online') {
+      engine.sendMultiplayerAction('ABORT_ROUND');
+      return;
+    }
     updateState(prev => ({
       ...prev,
       round: null,
       rno: Math.max(0, prev.rno - 1),
     }));
+  };
+
+  const handleRummyDraw = (source: 'closed' | 'open') => {
+    engine.sendMultiplayerAction('RUMMY_DRAW', { source });
+  };
+
+  const handleRummyDiscard = (cardIndex: number) => {
+    engine.sendMultiplayerAction('RUMMY_DISCARD', { cardIndex });
+  };
+
+  const handleRummyDeclare = (cardIndex?: number) => {
+    engine.sendMultiplayerAction('RUMMY_DECLARE', { cardIndex });
   };
 
   const handleSettleDeal = (winnerId: string, playerPoints: Record<string, number>) => {
@@ -96,7 +135,6 @@ export default function RummyGame() {
       const debts = { ...prev.debts };
       const wins = { ...prev.wins };
 
-      // Update debts
       Object.entries(res.debtsDelta).forEach(([k, amt]) => {
         const [d, c] = k.split('|');
         const rev = `${c}|${d}`;
@@ -115,7 +153,6 @@ export default function RummyGame() {
 
       wins[winnerId] = (wins[winnerId] || 0) + res.totalWinnings;
 
-      // Update cumulative points
       setCumulativePoints(cp => {
         const next = { ...cp };
         Object.entries(res.playerOutcomes).forEach(([id, outcome]) => {
@@ -172,9 +209,25 @@ export default function RummyGame() {
         roundTag={roundTag}
         currentGame="rummy"
         sessionName={engine.sessionName}
+        sessionDoc={engine.currentSessionDoc}
         onOpenSessions={() => engine.setShowSessionModal(true)}
+        onOpenJoinRoom={() => engine.setShowJoinRoomModal(true)}
         onGoogleSignIn={engine.handleGoogleSignIn}
         onResetGame={engine.resetGame}
+      />
+
+      <OperatorModals
+        gameState={gameState}
+        isOnlineMode={sessionMode === 'online'}
+        actionError={engine.actionError}
+        onClearError={() => engine.setActionError(null)}
+        showOperatorModal={engine.showOperatorModal}
+        setShowOperatorModal={engine.setShowOperatorModal}
+        onTransferGo={engine.transferGameOperator}
+        onVolunteerGo={engine.volunteerGameOperator}
+        onTriggerDisconnect={engine.triggerGoDisconnect}
+        onCheckTimeout={engine.checkGoTimeout}
+        onOpenDebtModal={() => engine.setShowDebtModal(true)}
       />
 
       <main id="app">
@@ -186,8 +239,16 @@ export default function RummyGame() {
           totalStats={gameState.tot}
           playerWins={gameState.wins}
           debts={gameState.debts}
+          sessionMode={sessionMode}
+          roomCode={engine.currentSessionDoc?.roomCode}
+          myPlayerId={myPlayer?.id}
+          isHost={isHost}
+          readyPlayers={gameState.readyPlayers}
+          chipRequests={gameState.chipRequests}
+          onResolveChipRequest={engine.resolveChipRequest}
           onAddPlayer={engine.addPlayer}
           onRemovePlayer={engine.removePlayer}
+          onRenamePlayer={engine.renamePlayer}
           onSitToggle={engine.toggleSit}
           onShuffle={engine.shufflePlayers}
           onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
@@ -200,14 +261,20 @@ export default function RummyGame() {
             players={gameState.players}
             round={rd}
             balanceMode={gameState.balanceMode}
+            sessionMode={sessionMode}
             pointValue={pointValue}
             rummyConfig={rummyConfig}
             cumulativePoints={cumulativePoints}
+            myPlayerId={myPlayer?.id || null}
+            isHost={isHost}
+            onRummyDraw={handleRummyDraw}
             onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
             onOpenConfigModal={() => setShowConfigModal(true)}
           />
           <div className="mut" style={{ textAlign: 'center', marginTop: 6 }} id="hint">
-            Offline {rummyConfig.totalCards}-Card Points Rummy · {formatConfigSummary(rummyConfig)}
+            {sessionMode === 'online'
+              ? `Online ${rummyConfig.totalCards}-Card Points Rummy · Draw from Stock or Open Pile & Discard on your turn.`
+              : `Offline ${rummyConfig.totalCards}-Card Points Rummy · ${formatConfigSummary(rummyConfig)}`}
           </div>
         </section>
 
@@ -219,12 +286,21 @@ export default function RummyGame() {
           pointValue={pointValue}
           rummyConfig={rummyConfig}
           cumulativePoints={cumulativePoints}
+          sessionMode={sessionMode}
+          myPlayerId={myPlayer?.id || null}
+          isHost={isHost}
+          readyPlayers={gameState.readyPlayers}
+          onToggleReady={engine.toggleReady}
+          onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
           onSetPointValue={setPointValue}
           onSetDefaultBuyIn={engine.setDefaultBuyIn}
           onResetAllBalances={engine.resetAllBalances}
           onUpdateConfig={(cfg) => engine.setRummyConfig(cfg)}
           onOpenConfigModal={() => setShowConfigModal(true)}
           onStartDeal={handleStartDeal}
+          onRummyDraw={handleRummyDraw}
+          onRummyDiscard={handleRummyDiscard}
+          onRummyDeclare={handleRummyDeclare}
           onSettleDeal={handleSettleDeal}
           onAbortDeal={handleAbortDeal}
         />
@@ -257,6 +333,8 @@ export default function RummyGame() {
         <DebtModal
           players={gameState.players}
           debts={gameState.debts}
+          myPlayerId={myPlayer?.id || null}
+          isHost={isHost}
           onClose={() => engine.setShowDebtModal(false)}
           onSettle={engine.settleDebt}
           onSettleAll={engine.settleAllDebts}
@@ -274,7 +352,16 @@ export default function RummyGame() {
         />
       )}
 
-      {engine.sessionsLoaded && !engine.sessionId && !engine.showSessionModal && (
+      {engine.showJoinRoomModal && (
+        <JoinRoomModal
+          onClose={() => engine.setShowJoinRoomModal(false)}
+          onJoinSuccess={(sess) => {
+            engine.switchSession(sess._id);
+          }}
+        />
+      )}
+
+      {engine.sessionsLoaded && !engine.sessionId && !engine.showSessionModal && !(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('session')) && (
         <div className="mdl">
           <div className="session-modal-box" style={{ maxWidth: 460, textAlign: 'center', padding: '36px 24px' }}>
             <div style={{ fontSize: 44, marginBottom: 12 }}>🎴</div>
@@ -307,9 +394,14 @@ export default function RummyGame() {
           <AddMoneyModal
             player={p}
             defaultBuyIn={gameState.defaultBuyIn}
+            sessionMode={sessionMode}
+            isHost={isHost}
+            chipRequests={gameState.chipRequests}
             onClose={() => engine.setAddMoneyTarget(null)}
             onAdjustMoney={engine.adjustMoney}
             onSetExactStack={engine.setPlayerBalance}
+            onRequestChips={engine.requestChips}
+            onResolveChipRequest={engine.resolveChipRequest}
           />
         );
       })()}

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Player, Round, COL, esc, money } from '@/types/game';
+import { Player, Round, ChipRequest, COL, esc, money } from '@/types/game';
 
 interface SeatsListProps {
   players: Player[];
@@ -11,8 +11,16 @@ interface SeatsListProps {
   totalStats: { rounds: number; total: number; big: number };
   playerWins: Record<string, number>;
   debts: Record<string, number>;
+  sessionMode?: 'tracker' | 'online';
+  roomCode?: string | null;
+  myPlayerId?: string | null;
+  isHost?: boolean;
+  readyPlayers?: Record<string, boolean>;
+  chipRequests?: ChipRequest[];
+  onResolveChipRequest?: (requestId: string, decision: 'approved' | 'rejected') => void;
   onAddPlayer: (name: string, customBalance?: number) => void;
   onRemovePlayer: (id: string) => void;
+  onRenamePlayer?: (id: string, newName: string) => void;
   onSitToggle: (id: string) => void;
   onShuffle: () => void;
   onOpenAddMoney: (id: string) => void;
@@ -28,8 +36,16 @@ export default function SeatsList({
   totalStats,
   playerWins,
   debts,
+  sessionMode = 'tracker',
+  roomCode,
+  myPlayerId,
+  isHost = true,
+  readyPlayers = {},
+  chipRequests = [],
+  onResolveChipRequest,
   onAddPlayer,
   onRemovePlayer,
+  onRenamePlayer,
   onSitToggle,
   onShuffle,
   onOpenAddMoney,
@@ -39,8 +55,13 @@ export default function SeatsList({
   const [newName, setNewName] = useState('');
   const [customBal, setCustomBal] = useState<string>('');
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string>('');
 
   const isBalMode = !!balanceMode;
+  const isOnline = sessionMode === 'online';
+  const isRoundActive = Boolean(round && !round.settled && round.phase !== 'result');
+  const pendingRequests = (chipRequests || []).filter(r => r.status === 'pending');
 
   // Net calculation for Debt mode
   const net: Record<string, number> = {};
@@ -65,14 +86,15 @@ export default function SeatsList({
     setCustomBal('');
   };
 
-  // Drag and drop reordering
+  // Drag and drop reordering (Admin only, when round is not running)
   const handleDragStart = (id: string) => {
+    if (!isHost || round) return;
     setDraggedId(id);
   };
 
   const handleDragOver = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
-    if (!draggedId || draggedId === targetId) return;
+    if (!isHost || round || !draggedId || draggedId === targetId) return;
     const dragIdx = players.findIndex(p => p.id === draggedId);
     const targetIdx = players.findIndex(p => p.id === targetId);
     if (dragIdx < 0 || targetIdx < 0) return;
@@ -99,8 +121,77 @@ export default function SeatsList({
 
   return (
     <aside id="left">
+      {/* Admin Pending Chip Requests Box */}
+      {isOnline && isBalMode && isHost && pendingRequests.length > 0 && (
+        <div
+          className="card"
+          style={{
+            borderColor: 'var(--gold)',
+            background: 'linear-gradient(145deg, rgba(244, 195, 79, 0.16), rgba(15, 23, 42, 0.9))',
+          }}
+        >
+          <h2 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>🪙 Chip Requests</span>
+            <span
+              style={{
+                background: 'var(--gold)',
+                color: '#000',
+                borderRadius: 99,
+                padding: '1px 8px',
+                fontSize: 11,
+                fontWeight: 900,
+              }}
+            >
+              {pendingRequests.length}
+            </span>
+          </h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {pendingRequests.map(req => (
+              <div
+                key={req.id}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: 'rgba(0,0,0,0.45)',
+                  border: '1px solid rgba(244,195,79,0.35)',
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  gap: 8,
+                }}
+              >
+                <div>
+                  <b style={{ fontSize: 13 }}>{req.playerName}</b>
+                  <div style={{ fontSize: 12, color: 'var(--gold)', fontWeight: 800 }}>
+                    Requested +{money(req.amount)}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 5 }}>
+                  <button
+                    type="button"
+                    className="sm good"
+                    style={{ padding: '4px 9px', fontSize: 11, fontWeight: 800 }}
+                    onClick={() => onResolveChipRequest?.(req.id, 'approved')}
+                  >
+                    ✓ Accept
+                  </button>
+                  <button
+                    type="button"
+                    className="sm bad"
+                    style={{ padding: '4px 8px', fontSize: 11 }}
+                    onClick={() => onResolveChipRequest?.(req.id, 'rejected')}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="card">
-        <h2>👥 Seats · drag ⠿ to reorder</h2>
+        <h2>👥 {isHost && !round ? 'Seats · drag ⠿ to reorder' : 'Seated Players'}</h2>
         <div className="plist">
           {!players.length ? (
             <p className="mut" style={{ margin: '8px 0' }}>Add players in seating order.</p>
@@ -108,24 +199,128 @@ export default function SeatsList({
             players.map(p => {
               const isBusted = isBalMode && (p.balance || 0) <= 0;
               const isAllIn = round?.allIn?.[p.id];
+              const canEditName = isHost || p.id === myPlayerId;
+              // Requests & chip edits are only allowed before a round starts or after a round ends
+              const canOpenChips = !isRoundActive && isBalMode && (!isOnline || isHost || p.id === myPlayerId);
+              const myPendingReq = pendingRequests.find(r => r.playerId === p.id);
+              const isPlayerReady = Boolean(readyPlayers?.[p.id]);
 
               return (
                 <div
                   key={p.id}
                   className={`pr ${draggedId === p.id ? 'dragging' : ''}`}
-                  draggable={!round}
+                  draggable={isHost && !round}
                   onDragStart={() => handleDragStart(p.id)}
                   onDragOver={(e) => handleDragOver(e, p.id)}
                   onDragEnd={handleDragEnd}
                 >
-                  <span className="hd" title="Drag to reorder seat">⠿</span>
+                  {isHost && !round && <span className="hd" title="Drag to reorder seat">⠿</span>}
                   {avFn(p.id)}
                   <div className="pr-main">
-                    <span className="nmx" style={{ opacity: p.sit ? 0.5 : 1 }}>
-                      {p.name}
-                    </span>
+                    {editingId === p.id ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input
+                          type="text"
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          maxLength={20}
+                          autoFocus
+                          style={{
+                            fontSize: 12,
+                            padding: '2px 6px',
+                            width: 110,
+                            borderRadius: 4,
+                            border: '1px solid #38bdf8',
+                            background: 'rgba(15, 23, 42, 0.9)',
+                            color: '#38bdf8',
+                            fontWeight: 700,
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              if (editingName.trim() && onRenamePlayer) {
+                                onRenamePlayer(p.id, editingName.trim());
+                              }
+                              setEditingId(null);
+                            } else if (e.key === 'Escape') {
+                              setEditingId(null);
+                            }
+                          }}
+                          onBlur={() => {
+                            if (editingName.trim() && onRenamePlayer) {
+                              onRenamePlayer(p.id, editingName.trim());
+                            }
+                            setEditingId(null);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="sm"
+                          style={{ padding: '2px 5px', fontSize: 10, background: '#0284c7', color: '#fff', border: 'none', borderRadius: 3, cursor: 'pointer' }}
+                          onClick={() => {
+                            if (editingName.trim() && onRenamePlayer) {
+                              onRenamePlayer(p.id, editingName.trim());
+                            }
+                            setEditingId(null);
+                          }}
+                        >
+                          ✓
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <span className="nmx" style={{ opacity: p.sit ? 0.5 : 1 }}>
+                          {p.name}
+                        </span>
+                        {p.id === myPlayerId && (
+                          <span style={{ fontSize: 9, background: '#38bdf8', color: '#0f172a', fontWeight: 900, padding: '1px 4px', borderRadius: 4 }}>
+                            YOU
+                          </span>
+                        )}
+                        {isOnline && !isRoundActive && !p.sit && (
+                          <span
+                            style={{
+                              fontSize: 9.5,
+                              background: isPlayerReady ? 'rgba(46, 204, 113, 0.2)' : 'rgba(242, 201, 76, 0.14)',
+                              color: isPlayerReady ? '#2ecc71' : '#f2c94c',
+                              border: isPlayerReady ? '1px solid rgba(46, 204, 113, 0.45)' : '1px solid rgba(242, 201, 76, 0.35)',
+                              fontWeight: 800,
+                              padding: '1px 5px',
+                              borderRadius: 999,
+                            }}
+                          >
+                            {isPlayerReady ? '👍 Ready' : '⏳'}
+                          </span>
+                        )}
+                        {canEditName && (
+                          <button
+                            type="button"
+                            title="Change username / Rename"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontSize: 11,
+                              padding: '0 2px',
+                              opacity: 0.6,
+                              color: '#94a3b8',
+                            }}
+                            onClick={() => {
+                              setEditingId(p.id);
+                              setEditingName(p.name);
+                            }}
+                          >
+                            ✏️
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {round && !round.parts?.includes(p.id) && (
+                      <span style={{ fontSize: 9.5, color: '#38bdf8', fontWeight: 800, marginTop: 2, display: 'block' }}>
+                        ⏳ Next Hand
+                      </span>
+                    )}
                     {isBalMode && (
-                      <div className="pr-sub">
+                      <div className="pr-sub" style={{ flexWrap: 'wrap' }}>
                         <span className={`bal-badge ${isBusted ? 'busted' : ''}`}>
                           {isBusted ? '💥 ₹0' : money(p.balance || 0)}
                         </span>
@@ -134,20 +329,25 @@ export default function SeatsList({
                             ALL-IN
                           </span>
                         )}
+                        {myPendingReq && (
+                          <span style={{ fontSize: 9.5, color: 'var(--gold)', fontWeight: 800 }}>
+                            ⏳ Req +{money(myPendingReq.amount)}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
                   <div className="pr-actions">
-                    {isBalMode && (
+                    {canOpenChips && (
                       <button
                         className="ib sm reload-btn"
-                        title="Add money / Rebuy"
+                        title={isOnline && !isHost ? 'Request chips from admin' : 'Manage chips (Credit / Debit / Overwrite)'}
                         onClick={() => onOpenAddMoney(p.id)}
                       >
                         +₹
                       </button>
                     )}
-                    {!round && (
+                    {isHost && !round && (
                       <>
                         <button
                           className="ib sm"
@@ -172,8 +372,8 @@ export default function SeatsList({
           )}
         </div>
 
-        {/* Add Player Box (only when no active round) */}
-        {!round && (
+        {/* Manual Player Add only in Offline Tracker Mode */}
+        {!isOnline && !round && isHost && (
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div className="row" style={{ gap: 6, flexWrap: 'nowrap', display: 'flex' }}>
               <input
@@ -227,11 +427,20 @@ export default function SeatsList({
           </div>
         )}
 
-        <button style={{ width: '100%', marginTop: 8 }} onClick={onShuffle}>
-          🔀 Shuffle order
-        </button>
+        {/* Shuffle Order: ONLY shown for Admin (isHost), and DISABLED while a game is running */}
+        {isHost && (
+          <button
+            style={{ width: '100%', marginTop: 8 }}
+            disabled={(!!round && !round.settled) || players.length < 2}
+            title={round && !round.settled ? 'Cannot shuffle seating order while a round is in progress' : 'Randomly shuffle player seating order'}
+            onClick={onShuffle}
+          >
+            🔀 Shuffle order
+          </button>
+        )}
+
         <button style={{ width: '100%', marginTop: 8 }} onClick={onOpenDebtModal}>
-          💸 Who owes who
+          💸 You owe &amp; Who owes you
         </button>
       </div>
 
@@ -277,4 +486,3 @@ export default function SeatsList({
     </aside>
   );
 }
-

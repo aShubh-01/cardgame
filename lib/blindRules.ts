@@ -198,5 +198,5 @@ export function calcTeenPattiNewBaseStake(raiseAmt: number, isBlind: boolean): n
   if (isBlind) {
     return Math.max(1, raiseAmt);
   }
-  return Math.max(1, Math.floor(raiseAmt / 2));
+  return Math.max(1, Math.ceil(raiseAmt / 2));
 }

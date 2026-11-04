@@ -3,6 +3,28 @@ export interface Player {
   name: string;
   sit: boolean;
   balance?: number;
+  userId?: string | null;
+  isOnline?: boolean;
+  isConnected?: boolean;
+  lastSeenAt?: number;
+  isGameOperator?: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderRole?: 'go' | 'player';
+  text: string;
+  createdAt: number;
+}
+
+export interface GODisconnectEvent {
+  disconnectedAt: number;
+  expiresAt: number;
+  status: 'volunteering' | 'queued';
+  volunteerUserId?: string | null;
+  volunteerName?: string | null;
 }
 
 export interface Ante {
@@ -14,6 +36,23 @@ export interface PokerCard {
   rank: string;
   suit: string;
   red: boolean;
+}
+
+export interface ChipRequest {
+  id: string;
+  playerId: string;
+  playerName: string;
+  amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
+}
+
+export interface DealerRequest {
+  id: string;
+  playerId: string;
+  playerName: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
 }
 
 export interface Round {
@@ -43,6 +82,31 @@ export interface Round {
   dealer?: string;
   smallBlind?: { playerId: string; amt: number };
   bigBlind?: { playerId: string; amt: number };
+  hands?: Record<string, any>;
+  revealedHands?: Record<string, any>;
+  handEvaluations?: Record<string, { rankName: string; score: number }>;
+  board?: PokerCard[];
+  boardCards?: PokerCard[];
+  deck?: PokerCard[];
+  deckRemaining?: number;
+  // Rummy virtual card fields
+  openCard?: PokerCard | null;
+  discardPile?: PokerCard[];
+  jokerCard?: PokerCard | null;
+  rummyStep?: 'draw' | 'discard';
+  dropped?: Record<string, number>;
+  rummyScores?: Record<string, number>;
+  // Blackjack virtual card fields
+  dealerHand?: any;
+  dealerHoleRevealed?: boolean;
+  bjStatus?: Record<string, 'playing' | 'stood' | 'busted' | 'blackjack' | 'doubled'>;
+  bjOutcomes?: Record<string, { outcome: string; net: number; total: number }>;
+  settled?: boolean;
+  mutualShowRequest?: {
+    requesterId: string;
+    requesterName: string;
+    approvals: Record<string, 'accepted' | 'rejected'>;
+  } | null;
 }
 
 export interface HistEntry {
@@ -68,6 +132,22 @@ export interface GameState {
   dealerIdx?: number;
   blinds?: { sb: number; bb: number };
   rummyConfig?: any;
+  chipRequests?: ChipRequest[];
+  dealerRequests?: DealerRequest[];
+  chatMessages?: ChatMessage[];
+  bjDealerId?: string | 'house';
+  bjDealerRotation?: boolean;
+  gameOperatorUserId?: string | null;
+  nextGameOperatorUserId?: string | null;
+  goLastHeartbeat?: number;
+  goDisconnectEvent?: GODisconnectEvent | null;
+  readyPlayers?: Record<string, boolean>;
+  activityLog?: string[];
+  myRole?: 'owner_go' | 'go' | 'owner_player' | 'player';
+  isSessionOwner?: boolean;
+  isGameOperator?: boolean;
+  isQueuedGameOperator?: boolean;
+  operatorProfile?: Player | null;
 }
 
 export interface SessionDoc {
@@ -75,6 +155,20 @@ export interface SessionDoc {
   name: string;
   gameType: 'tp' | 'pk' | 'rummy' | 'bj';
   status: 'active' | 'archived';
+  sessionMode?: 'tracker' | 'online';
+  roomCode?: string;
+  hostUserId?: string;
+  gameOperatorUserId?: string | null;
+  nextGameOperatorUserId?: string | null;
+  goLastHeartbeat?: number;
+  goDisconnectEvent?: GODisconnectEvent | null;
+  readyPlayers?: Record<string, boolean>;
+  activityLog?: string[];
+  myRole?: 'owner_go' | 'go' | 'owner_player' | 'player';
+  isSessionOwner?: boolean;
+  isGameOperator?: boolean;
+  isQueuedGameOperator?: boolean;
+  operatorProfile?: Player | null;
   balanceMode?: boolean;
   players?: Player[];
   round?: Round | null;
@@ -83,6 +177,11 @@ export interface SessionDoc {
   hist?: HistEntry[];
   tot?: { rounds: number; total: number; big: number };
   rummyConfig?: any;
+  chipRequests?: ChipRequest[];
+  dealerRequests?: DealerRequest[];
+  chatMessages?: ChatMessage[];
+  bjDealerId?: string | 'house';
+  bjDealerRotation?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

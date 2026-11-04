@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { SessionDoc, money } from '@/types/game';
 
 interface SessionsModalProps {
@@ -10,7 +11,14 @@ interface SessionsModalProps {
   initialGameFilter?: 'all' | 'tp' | 'pk' | 'rummy' | 'bj';
   onClose: () => void;
   onSwitchSession: (sessionId: string) => Promise<SessionDoc | null | void> | void;
-  onCreateSession: (name: string, gameType: 'tp' | 'pk' | 'rummy' | 'bj', balanceMode: boolean, defaultBuyIn?: number) => Promise<SessionDoc | null | void>;
+  onCreateSession: (
+    name: string,
+    gameType: 'tp' | 'pk' | 'rummy' | 'bj',
+    balanceMode: boolean,
+    defaultBuyIn?: number,
+    sessionMode?: 'tracker' | 'online',
+    hostName?: string
+  ) => Promise<SessionDoc | null | void>;
   onSessionChosen?: (session: SessionDoc) => void;
 }
 
@@ -45,15 +53,22 @@ export default function SessionsModal({
   onSessionChosen,
 }: SessionsModalProps) {
   const router = useRouter();
+  const { data: authSession } = useSession();
+  const defaultHostName = authSession?.user?.name || authSession?.user?.email?.split('@')[0] || '';
+
   const [filter, setFilter] = useState<'all' | 'tp' | 'pk' | 'rummy' | 'bj'>(initialGameFilter);
   const [isCreating, setIsCreating] = useState(false);
+  const [newMode, setNewMode] = useState<'tracker' | 'online'>('tracker');
   const [newName, setNewName] = useState('');
+  const [hostPlayerName, setHostPlayerName] = useState(defaultHostName);
   const [newGame, setNewGame] = useState<'tp' | 'pk' | 'rummy' | 'bj'>(
     initialGameFilter !== 'all' ? initialGameFilter : 'pk'
   );
   const [newBalMode, setNewBalMode] = useState(false);
-  const [newBuyIn, setNewBuyIn] = useState(1000);
+  const [newBuyInStr, setNewBuyInStr] = useState<string>('1000');
   const [submitting, setSubmitting] = useState(false);
+  const newBuyIn = newBuyInStr.trim() === '' ? 0 : Math.floor(Number(newBuyInStr));
+  const isBuyInValid = !newBalMode || (!isNaN(newBuyIn) && newBuyIn >= 10);
 
   const filteredSessions = sessions.filter(s => {
     if (filter === 'all') return true;
@@ -65,7 +80,11 @@ export default function SessionsModal({
     if (onSessionChosen) {
       onSessionChosen(sess);
     } else {
-      router.push(GAME_ROUTES[sess.gameType]);
+      if (typeof window !== 'undefined') {
+        window.location.href = `${GAME_ROUTES[sess.gameType]}?session=${sess._id}`;
+      } else {
+        router.push(`${GAME_ROUTES[sess.gameType]}?session=${sess._id}`);
+      }
     }
     onClose();
   };
@@ -78,7 +97,9 @@ export default function SessionsModal({
         newName.trim(),
         newGame,
         newBalMode,
-        newBalMode ? newBuyIn : undefined
+        newBalMode ? newBuyIn : undefined,
+        newMode,
+        newMode === 'online' ? hostPlayerName.trim() : undefined
       );
       setNewName('');
       setIsCreating(false);
@@ -87,7 +108,12 @@ export default function SessionsModal({
         if (onSessionChosen) {
           onSessionChosen(created as SessionDoc);
         } else {
-          router.push(GAME_ROUTES[(created as SessionDoc).gameType]);
+          const sess = created as SessionDoc;
+          if (typeof window !== 'undefined') {
+            window.location.href = `${GAME_ROUTES[sess.gameType]}?session=${sess._id}`;
+          } else {
+            router.push(`${GAME_ROUTES[sess.gameType]}?session=${sess._id}`);
+          }
         }
       } else {
         router.push(GAME_ROUTES[newGame]);
@@ -143,6 +169,54 @@ export default function SessionsModal({
               Create New {filter !== 'all' ? GAME_NAMES[filter] : ''} Session
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Mode Selection */}
+              <div>
+                <label style={{ fontSize: 11, opacity: 0.8, display: 'block', marginBottom: 4 }}>Session Mode</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+                  <div
+                    onClick={() => setNewMode('tracker')}
+                    style={{
+                      cursor: 'pointer',
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      border: newMode === 'tracker' ? '1.5px solid var(--gold)' : '1px solid rgba(255,255,255,0.12)',
+                      background: newMode === 'tracker' ? 'rgba(244, 195, 79, 0.12)' : 'rgba(0,0,0,0.25)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, color: newMode === 'tracker' ? 'var(--gold)' : '#fff' }}>
+                      <span>🎲</span>
+                      <span>IRL Tracker Mode</span>
+                      {newMode === 'tracker' && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--gold)' }}>✓</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--mut)', marginTop: 4, lineHeight: 1.35 }}>
+                      Playing with physical cards in real life. Admin manually records rounds, chip stacks, and settlements.
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => setNewMode('online')}
+                    style={{
+                      cursor: 'pointer',
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      border: newMode === 'online' ? '1.5px solid #38bdf8' : '1px solid rgba(255,255,255,0.12)',
+                      background: newMode === 'online' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(0,0,0,0.25)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, color: newMode === 'online' ? '#38bdf8' : '#fff' }}>
+                      <span>🌐</span>
+                      <span>Online Multiplayer</span>
+                      {newMode === 'online' && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#38bdf8' }}>✓</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--mut)', marginTop: 4, lineHeight: 1.35 }}>
+                      Play online across devices with a shareable Room Code. Virtual cards, decentralized player inputs &amp; sync.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label style={{ fontSize: 11, opacity: 0.8, display: 'block', marginBottom: 3 }}>Session Name</label>
                 <input
@@ -156,6 +230,34 @@ export default function SessionsModal({
                   autoFocus
                 />
               </div>
+
+              {newMode === 'online' && (
+                <div>
+                  <label style={{ fontSize: 11, opacity: 0.8, display: 'block', marginBottom: 3 }}>
+                    Your Display Name (Session Owner &amp; Default Game Operator)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter your name / nickname"
+                    value={hostPlayerName}
+                    onChange={(e) => setHostPlayerName(e.target.value)}
+                    maxLength={20}
+                    style={{
+                      width: '100%',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      border: '1px solid rgba(56, 189, 248, 0.4)',
+                      background: 'rgba(15, 23, 42, 0.7)',
+                      color: '#38bdf8',
+                    }}
+                  />
+                  <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                    You start as the Session Owner &amp; stealth Game Operator (hidden from players). You can transfer the Game Operator role to any player before/after a round if you want to play!
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 140 }}>
@@ -222,21 +324,21 @@ export default function SessionsModal({
               {newBalMode ? (
                 <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(244,195,79,0.25)', borderRadius: 8, padding: '10px 12px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12 }}>Starting Buy-in per player:</span>
+                    <span style={{ fontSize: 12 }}>Starting Buy-in per player (Min ₹10):</span>
                     <input
-                      type="number"
-                      min="10"
-                      step="50"
-                      value={newBuyIn}
-                      onChange={(e) => setNewBuyIn(+e.target.value || 1000)}
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="1000"
+                      value={newBuyInStr}
+                      onChange={(e) => setNewBuyInStr(e.target.value.replace(/[^0-9]/g, ''))}
                       style={{ width: 100, textAlign: 'center', fontSize: 14 }}
                     />
                   </div>
                   <div className="q" style={{ marginTop: 8 }}>
-                    <button type="button" className="sm" onClick={() => setNewBuyIn(500)}>₹500</button>
-                    <button type="button" className="sm" onClick={() => setNewBuyIn(1000)}>₹1,000</button>
-                    <button type="button" className="sm" onClick={() => setNewBuyIn(2000)}>₹2,000</button>
-                    <button type="button" className="sm" onClick={() => setNewBuyIn(5000)}>₹5,000</button>
+                    <button type="button" className="sm" onClick={() => setNewBuyInStr('500')}>₹500</button>
+                    <button type="button" className="sm" onClick={() => setNewBuyInStr('1000')}>₹1,000</button>
+                    <button type="button" className="sm" onClick={() => setNewBuyInStr('2000')}>₹2,000</button>
+                    <button type="button" className="sm" onClick={() => setNewBuyInStr('5000')}>₹5,000</button>
                   </div>
                   <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
                     Every player starts with this chip stack. All-ins and rebuys are tracked.
@@ -253,7 +355,7 @@ export default function SessionsModal({
                 <button
                   className="sm pri"
                   style={{ fontWeight: 800, padding: '6px 16px' }}
-                  disabled={!newName.trim() || submitting}
+                  disabled={!newName.trim() || !isBuyInValid || submitting}
                   onClick={handleCreate}
                 >
                   {submitting ? 'Creating...' : 'Create & Play'}
@@ -339,7 +441,19 @@ export default function SessionsModal({
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--mut)', marginTop: 6, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 10, fontSize: 12, color: 'var(--mut)', marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span style={{
+                      fontSize: 10.5,
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      background: sess.sessionMode === 'online' ? 'rgba(56, 189, 248, 0.16)' : 'rgba(255, 255, 255, 0.08)',
+                      color: sess.sessionMode === 'online' ? '#38bdf8' : '#e2e8f0',
+                      border: sess.sessionMode === 'online' ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(255, 255, 255, 0.15)',
+                      fontWeight: 700,
+                      letterSpacing: '0.02em',
+                    }}>
+                      {sess.sessionMode === 'online' ? `🌐 Online · Room ${sess.roomCode || ''}` : '🎲 IRL Tracker'}
+                    </span>
                     <span>👥 {playersCount} players</span>
                     <span>
                       {sess.gameType === 'rummy' ? `🎴 ${roundsCount} deals` : sess.gameType === 'bj' ? `♦ ${roundsCount} hands` : `🃏 ${roundsCount} rounds`}

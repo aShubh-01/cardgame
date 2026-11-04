@@ -9,11 +9,13 @@ import SessionsModal from '@/components/common/SessionsModal';
 import AddMoneyModal from '@/components/common/AddMoneyModal';
 import GoogleConfigModal from '@/components/common/GoogleConfigModal';
 import ConfirmModal from '@/components/common/ConfirmModal';
+import JoinRoomModal from '@/components/common/JoinRoomModal';
+import OperatorModals from '@/components/common/OperatorModals';
 import PokerTable from '@/components/poker/PokerTable';
 import PokerControls from '@/components/poker/PokerControls';
 import { useGameEngine } from '@/hooks/useGameEngine';
-import { calculatePots, distributePots } from '@/lib/pokerPot';
-import { money } from '@/types/game';
+import { applyPokerAction, settlePokerShowdown, PokerActionType } from '@/lib/pokerEngine';
+import { sounds } from '@/lib/soundEffects';
 
 export default function PokerGame() {
   React.useEffect(() => {
@@ -27,9 +29,30 @@ export default function PokerGame() {
   const { gameState, updateState } = engine;
   const rd = gameState.round;
 
+  const myEmail = engine.authSession?.user?.email;
+  const myPlayer = gameState.players.find(
+    p => p.userId && p.userId.toLowerCase() === myEmail?.toLowerCase()
+  );
+  const sessionMode = engine.currentSessionDoc?.sessionMode || 'tracker';
+  const isHost =
+    sessionMode !== 'online'
+      ? true
+      : gameState.isGameOperator !== undefined
+      ? Boolean(gameState.isGameOperator)
+      : Boolean(
+          myEmail &&
+            (engine.currentSessionDoc?.gameOperatorUserId || engine.currentSessionDoc?.hostUserId)?.toLowerCase() ===
+              myEmail.toLowerCase()
+        );
+
   /* ───────── Poker Act ───────── */
   const handlePokerAct = (t: string, a?: number) => {
     if (!rd) return;
+    if (sessionMode === 'online') {
+      engine.sendMultiplayerAction('POKER_ACT', { subAction: t, amount: a });
+      return;
+    }
+
     if (t === 'showdown') {
       updateState(prev => {
         if (!prev.round) return prev;
@@ -46,362 +69,78 @@ export default function PokerGame() {
       return;
     }
 
-    const id = rd.turn;
-    const me = gameState.players.find(p => p.id === id)?.name || id;
-    const sc = (rd.st?.[id]) || 0;
-    const toCall = Math.max(0, (rd.cur || 0) - sc);
-
     updateState(prev => {
       const currentRd = prev.round;
       if (!currentRd) return prev;
       engine.takeSnapshot(currentRd, prev.players);
 
-      let players = [...prev.players];
-      const acted = { ...(currentRd.acted || {}) };
-      const st = { ...(currentRd.st || {}) };
-      const contrib = { ...(currentRd.contrib || {}) };
-      const folded = { ...(currentRd.folded || {}) };
-      const allIn = { ...(currentRd.allIn || {}) };
-      const log = [...currentRd.log];
-      let cur = currentRd.cur || 0;
-      let stake = currentRd.stake || 0;
-      let lastBy = currentRd.lastBy;
-      let lastRaiser = currentRd.lastRaiser;
-      let minRaise = currentRd.minRaise || 10;
-      let street = currentRd.street || 0;
-      let phase = currentRd.phase;
-      let winners = currentRd.winners || [];
-
-      if (t === 'check') {
-        if (toCall > 0) return prev;
-        acted[id] = 1;
-        lastBy = `${me} checked`;
-        log.push(`${me} checks`);
-      } else if (t === 'fold') {
-        folded[id] = 1;
-        delete acted[id];
-        lastBy = `${me} folded`;
-        log.push(`${me} folded`);
-
-        const remaining = currentRd.parts.filter(pId => !folded[pId]);
-        if (remaining.length === 1) {
-          log.push(`🏆 Everyone folded! ${players.find(p => p.id === remaining[0])?.name || remaining[0]} wins the pot!`);
-          return {
-            ...prev,
-            round: {
-              ...currentRd,
-              folded,
-              acted,
-              lastBy,
-              log,
-              phase: 'result',
-              winners: [remaining[0]],
-            },
-          };
-        }
-      } else if (t === 'call') {
-        if (toCall <= 0) {
-          acted[id] = 1;
-          lastBy = `${me} checked`;
-          log.push(`${me} checks`);
-        } else {
-          let actualCall = toCall;
-          let isAllIn = false;
-          if (prev.balanceMode) {
-            const pIdx = players.findIndex(p => p.id === id);
-            if (pIdx < 0) return prev;
-            const p = players[pIdx];
-            const bal = p.balance || 0;
-            if (bal <= 0) return prev;
-
-            if (bal < toCall) {
-              actualCall = bal;
-              players[pIdx] = { ...p, balance: 0 };
-              isAllIn = true;
-            } else {
-              actualCall = toCall;
-              const nextBal = bal - actualCall;
-              players[pIdx] = { ...p, balance: nextBal };
-              if (nextBal === 0) isAllIn = true;
-            }
-          }
-
-          contrib[id] = (contrib[id] || 0) + actualCall;
-          st[id] = sc + actualCall;
-          acted[id] = 1;
-          if (isAllIn) allIn[id] = true;
-
-          const callBet = sc + actualCall;
-          const msg = isAllIn ? `${me} called ALL-IN for ${money(callBet)}! 🚨` : `${me} called ${money(callBet)}`;
-          lastBy = msg;
-          log.push(msg);
-        }
-      } else if (t === 'raise') {
-        const targetBet = a || 0;
-        const toAdd = targetBet - sc;
-        if (toAdd <= 0 || targetBet <= cur) return prev;
-
-        let actualAdd = toAdd;
-        let isAllIn = false;
-        if (prev.balanceMode) {
-          const pIdx = players.findIndex(p => p.id === id);
-          if (pIdx < 0) return prev;
-          const p = players[pIdx];
-          const bal = p.balance || 0;
-          if (bal < toAdd) return prev;
-
-          actualAdd = toAdd;
-          const nextBal = Math.max(0, bal - actualAdd);
-          players[pIdx] = { ...p, balance: nextBal };
-          if (nextBal === 0) isAllIn = true;
-        }
-
-        if (isAllIn) allIn[id] = true;
-        const isFirstBet = cur === 0;
-        const newStreetBet = sc + actualAdd;
-        const raiseSize = newStreetBet - cur;
-
-        contrib[id] = (contrib[id] || 0) + actualAdd;
-        st[id] = newStreetBet;
-        cur = newStreetBet;
-        stake = newStreetBet;
-        lastRaiser = id;
-        if (raiseSize > 0) minRaise = Math.max(minRaise, raiseSize);
-
-        // Reset acted for other players so they must respond to raise
-        Object.keys(acted).forEach(k => delete acted[k]);
-        acted[id] = 1;
-
-        const actionTxt = isAllIn
-          ? (isFirstBet ? ' bet ALL-IN ' : ' raised ALL-IN to ')
-          : (isFirstBet ? ' bet ' : ' raised to ');
-        lastBy = me + actionTxt + money(newStreetBet);
-        log.push(me + actionTxt + money(newStreetBet) + (isAllIn ? ' 🚨' : ''));
-      } else if (t === 'allin') {
-        const pIdx = players.findIndex(p => p.id === id);
-        if (pIdx < 0) return prev;
-        const p = players[pIdx];
-        const bal = p.balance || 0;
-        if (bal <= 0) return prev;
-
-        const actualAdd = bal;
-        players[pIdx] = { ...p, balance: 0 };
-        allIn[id] = true;
-        const newStreetBet = sc + actualAdd;
-
-        contrib[id] = (contrib[id] || 0) + actualAdd;
-        st[id] = newStreetBet;
-
-        if (newStreetBet > cur) {
-          const raiseSize = newStreetBet - cur;
-          cur = newStreetBet;
-          stake = newStreetBet;
-          lastRaiser = id;
-          if (raiseSize > 0) minRaise = Math.max(minRaise, raiseSize);
-          Object.keys(acted).forEach(k => delete acted[k]);
-          acted[id] = 1;
-        } else {
-          acted[id] = 1;
-        }
-
-        const msg = `${me} went ALL-IN for ${money(newStreetBet)}! 🚨`;
-        lastBy = msg;
-        log.push(msg);
-      }
-
-      // Check loop completion
-      const currentActive = currentRd.parts.filter(pId => !folded[pId]);
-      const canActPlayers = currentActive.filter(pId => !allIn[pId]);
-      const allActed = canActPlayers.every(pId => acted[pId]);
-      const allMatched = canActPlayers.every(pId => (st[pId] || 0) === cur);
-      const noMoreBetting = canActPlayers.length === 0 || (canActPlayers.length === 1 && allActed && allMatched);
-
-      let nextTurn = currentRd.turn;
-
-      if ((allActed && allMatched) || noMoreBetting) {
-        if (noMoreBetting && street !== 3) {
-          street = 3;
-          phase = 'result';
-          winners = [];
-          log.push('— All players All-In! Board dealt to River · Showdown —');
-        } else if (street === 3) {
-          phase = 'result';
-          winners = [];
-          log.push('— Showdown: Tap the winner(s) of each pot —');
-        } else {
-          street = street + 1;
-          Object.keys(st).forEach(k => delete st[k]);
-          Object.keys(acted).forEach(k => delete acted[k]);
-          cur = 0;
-          stake = 0;
-          lastRaiser = null;
-          minRaise = prev.ante.amt || 10;
-          const streetLabels = ['Pre-flop', 'Flop', 'Turn', 'River'];
-          const desc = street === 1 ? 'Loop 1: Flop revealed (3 cards open)' : street === 2 ? 'Loop 2: Turn revealed (4th card open)' : 'Loop 3: River revealed (5th card open)';
-          lastBy = `${streetLabels[street]} dealt`;
-          log.push(`— ${desc} —`);
-
-          // Post-flop action starts clockwise from Dealer (usually SB or next active player)
-          const o = prev.players.map(p => p.id).filter(pId => currentRd.parts.includes(pId));
-          const dealerId = currentRd.dealer || o[0];
-          let dIdx = o.indexOf(dealerId);
-          if (dIdx < 0) dIdx = 0;
-          let nextP: string | null = null;
-          for (let k = 1; k <= o.length; k++) {
-            const cand = o[(dIdx + k) % o.length];
-            if (!folded[cand] && !allIn[cand]) {
-              nextP = cand;
-              break;
-            }
-          }
-
-          if (nextP) {
-            nextTurn = nextP;
-          } else {
-            phase = 'result';
-            winners = [];
-          }
-        }
-      } else {
-        // Advance turn
-        const o = prev.players.map(p => p.id).filter(pId => currentRd.parts.includes(pId));
-        let idx = o.indexOf(currentRd.turn);
-        for (let k = 0; k < o.length; k++) {
-          idx = (idx + 1) % o.length;
-          if (!folded[o[idx]] && !allIn[o[idx]]) {
-            nextTurn = o[idx];
-            break;
-          }
-        }
-      }
-
+      const next = applyPokerAction(
+        {
+          players: prev.players,
+          round: currentRd,
+          anteAmt: prev.ante.amt || 10,
+          balanceMode: !!prev.balanceMode,
+        },
+        t as PokerActionType,
+        a
+      );
+      if (!next) return prev;
       return {
         ...prev,
-        players,
-        round: {
-          ...currentRd,
-          parts: currentRd.parts,
-          contrib,
-          folded,
-          turn: nextTurn,
-          stake,
-          stack: currentRd.stack,
-          log,
-          lastBy,
-          winner: currentRd.winner,
-          street,
-          cur,
-          st,
-          acted,
-          winners,
-          lastRaiser,
-          minRaise,
-          allIn,
-          phase,
-        },
+        players: next.players,
+        round: next.round,
       };
     });
+  };
+
+  /* ───────── Mutual Showdown Request & Response ───────── */
+  const handleRequestMutualShow = () => {
+    if (!rd || rd.phase !== 'bet') return;
+    if (sessionMode === 'online') {
+      engine.sendMultiplayerAction('REQUEST_MUTUAL_SHOW');
+      return;
+    }
+    handlePokerAct('showdown');
+  };
+
+  const handleRespondMutualShow = (decision: 'accepted' | 'rejected') => {
+    if (!rd || rd.phase !== 'bet') return;
+    if (sessionMode === 'online') {
+      engine.sendMultiplayerAction('RESPOND_MUTUAL_SHOW', { decision });
+      return;
+    }
+    if (decision === 'accepted') {
+      handlePokerAct('showdown');
+    }
   };
 
   /* ───────── Showdown Settle ───────── */
   const handleConfirmShowdown = (potWinners: Record<string, string[]>) => {
     if (!rd) return;
-    const { pots, totalPot } = calculatePots(rd.contrib || {}, rd.folded || {});
-    if (!pots.length || totalPot <= 0) {
-      updateState(prev => ({ ...prev, round: null }));
+    sounds.playWinSound();
+    if (sessionMode === 'online') {
+      engine.sendMultiplayerAction('POKER_SETTLE', { potWinners });
       return;
     }
 
-    const playerMap: Record<string, { name: string }> = {};
-    gameState.players.forEach(p => { playerMap[p.id] = { name: p.name }; });
-    const summary = distributePots(pots, potWinners, playerMap);
-    const pays: { name: string; amt: number }[] = [];
-
     updateState(prev => {
-      let players = [...prev.players];
-      const debts = { ...prev.debts };
-      const wins = { ...prev.wins };
-
-      if (prev.balanceMode) {
-        players = players.map(p => {
-          const won = summary.totalPlayerWins[p.id] || 0;
-          const nextBal = (p.balance || 0) + won;
-          return {
-            ...p,
-            balance: nextBal,
-            sit: nextBal <= 0 ? true : p.sit,
-          };
-        });
-
-        rd.parts.forEach(id => {
-          const won = summary.totalPlayerWins[id] || 0;
-          const netAmt = won - (rd.contrib[id] || 0);
-          if (netAmt < 0) {
-            pays.push({ name: players.find(p => p.id === id)?.name || id, amt: -netAmt });
-          }
-        });
-      } else {
-        const nets: Record<string, number> = {};
-        rd.parts.forEach(id => {
-          nets[id] = (summary.totalPlayerWins[id] || 0) - (rd.contrib[id] || 0);
-        });
-        const cr = Object.entries(nets).filter(e => e[1] > 0);
-        const tc = cr.reduce((a, e) => a + e[1], 0);
-
-        Object.entries(nets).filter(e => e[1] < 0).forEach(([d, v]) => {
-          let left = -v;
-          cr.forEach(([c, cv], i) => {
-            const x = i === cr.length - 1 ? left : Math.round(-v * cv / tc);
-            left -= x;
-            const k = `${d}|${c}`;
-            const rk = `${c}|${d}`;
-            const rev = debts[rk] || 0;
-            if (rev >= x) {
-              debts[rk] = rev - x;
-              if (!debts[rk]) delete debts[rk];
-            } else {
-              const rem = x - rev;
-              delete debts[rk];
-              debts[k] = (debts[k] || 0) + rem;
-            }
-          });
-          pays.push({ name: players.find(p => p.id === d)?.name || d, amt: -v });
-        });
-      }
-
-      Object.entries(summary.totalPlayerWins).forEach(([wId, amt]) => {
-        wins[wId] = (wins[wId] || 0) + amt;
-      });
-
-      const winningNames = Object.entries(summary.totalPlayerWins)
-        .filter(([, amt]) => amt > 0)
-        .map(([id]) => players.find(p => p.id === id)?.name || id)
-        .join(' & ');
-
-      const tot = {
-        rounds: (prev.tot?.rounds || 0) + 1,
-        total: (prev.tot?.total || 0) + totalPot,
-        big: Math.max(prev.tot?.big || 0, totalPot),
-      };
-
-      const hist = [
-        { no: rd.no, winner: winningNames || 'Split', pot: totalPot, got: totalPot, pays },
-        ...prev.hist,
-      ].slice(0, 30);
-
-      const activePlayers = players.filter(p => !p.sit);
-      const currentDIdx = prev.dealerIdx ?? 0;
-      const nextDIdx = activePlayers.length > 0 ? (currentDIdx + 1) % activePlayers.length : 0;
-
+      if (!prev.round) return prev;
+      const settled = settlePokerShowdown(
+        {
+          players: prev.players,
+          round: prev.round,
+          debts: prev.debts,
+          wins: prev.wins,
+          hist: prev.hist,
+          tot: prev.tot,
+          balanceMode: !!prev.balanceMode,
+          dealerIdx: prev.dealerIdx ?? 0,
+        },
+        potWinners
+      );
       return {
         ...prev,
-        players,
-        debts,
-        wins,
-        tot,
-        hist,
-        round: null,
-        dealerIdx: nextDIdx,
+        ...settled,
       };
     });
   };
@@ -426,9 +165,25 @@ export default function PokerGame() {
         roundTag={roundTag}
         sessionName={engine.sessionName}
         currentGame="pk"
+        sessionDoc={engine.currentSessionDoc}
         onOpenSessions={() => engine.setShowSessionModal(true)}
+        onOpenJoinRoom={() => engine.setShowJoinRoomModal(true)}
         onResetGame={engine.resetGame}
         onGoogleSignIn={engine.handleGoogleSignIn}
+      />
+
+      <OperatorModals
+        gameState={gameState}
+        isOnlineMode={sessionMode === 'online'}
+        actionError={engine.actionError}
+        onClearError={() => engine.setActionError(null)}
+        showOperatorModal={engine.showOperatorModal}
+        setShowOperatorModal={engine.setShowOperatorModal}
+        onTransferGo={engine.transferGameOperator}
+        onVolunteerGo={engine.volunteerGameOperator}
+        onTriggerDisconnect={engine.triggerGoDisconnect}
+        onCheckTimeout={engine.checkGoTimeout}
+        onOpenDebtModal={() => engine.setShowDebtModal(true)}
       />
 
       <main>
@@ -440,8 +195,16 @@ export default function PokerGame() {
           totalStats={gameState.tot}
           playerWins={gameState.wins}
           debts={gameState.debts}
+          sessionMode={sessionMode}
+          roomCode={engine.currentSessionDoc?.roomCode}
+          myPlayerId={myPlayer?.id}
+          isHost={isHost}
+          readyPlayers={gameState.readyPlayers}
+          chipRequests={gameState.chipRequests}
+          onResolveChipRequest={engine.resolveChipRequest}
           onAddPlayer={engine.addPlayer}
           onRemovePlayer={engine.removePlayer}
+          onRenamePlayer={engine.renamePlayer}
           onSitToggle={engine.toggleSit}
           onShuffle={engine.shufflePlayers}
           onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
@@ -454,10 +217,15 @@ export default function PokerGame() {
             players={gameState.players}
             round={rd}
             balanceMode={gameState.balanceMode}
+            sessionMode={sessionMode}
+            myPlayerId={myPlayer?.id || null}
+            isHost={isHost}
             onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
           />
           <div className="mut" style={{ textAlign: 'center', marginTop: 6 }} id="hint">
-            Cards are dealt and played in real life. Track community cards, bets, chip stacks &amp; side pots.
+            {sessionMode === 'online'
+              ? 'Online Multiplayer · Virtual cards dealt securely · Enter your bet on your turn.'
+              : 'Cards are dealt and played in real life. Track community cards, bets, chip stacks & side pots.'}
           </div>
         </section>
 
@@ -469,6 +237,9 @@ export default function PokerGame() {
           ante={gameState.ante}
           blinds={gameState.blinds}
           dealerIdx={gameState.dealerIdx ?? 0}
+          readyPlayers={gameState.readyPlayers}
+          onToggleReady={engine.toggleReady}
+          onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
           onSetBlinds={engine.setBlinds}
           onStartRound={engine.startRound}
           onAbortRound={engine.abortRound}
@@ -479,7 +250,12 @@ export default function PokerGame() {
           onSetAnteMode={engine.setAnteMode}
           onSetAnteAmt={engine.setAnteAmt}
           onAct={handlePokerAct}
+          onRequestMutualShow={handleRequestMutualShow}
+          onRespondMutualShow={handleRespondMutualShow}
           onConfirmShowdown={handleConfirmShowdown}
+          sessionMode={sessionMode}
+          myPlayerId={myPlayer?.id || null}
+          isHost={isHost}
         />
       </main>
 
@@ -502,6 +278,8 @@ export default function PokerGame() {
         <DebtModal
           players={gameState.players}
           debts={gameState.debts}
+          myPlayerId={myPlayer?.id || null}
+          isHost={isHost}
           onClose={() => engine.setShowDebtModal(false)}
           onSettle={engine.settleDebt}
           onSettleAll={engine.settleAllDebts}
@@ -515,9 +293,14 @@ export default function PokerGame() {
           <AddMoneyModal
             player={p}
             defaultBuyIn={gameState.defaultBuyIn}
+            sessionMode={sessionMode}
+            isHost={isHost}
+            chipRequests={gameState.chipRequests}
             onClose={() => engine.setAddMoneyTarget(null)}
             onAdjustMoney={engine.adjustMoney}
             onSetExactStack={engine.setPlayerBalance}
+            onRequestChips={engine.requestChips}
+            onResolveChipRequest={engine.resolveChipRequest}
           />
         );
       })()}
@@ -537,7 +320,16 @@ export default function PokerGame() {
         />
       )}
 
-      {engine.sessionsLoaded && !engine.sessionId && !engine.showSessionModal && (
+      {engine.showJoinRoomModal && (
+        <JoinRoomModal
+          onClose={() => engine.setShowJoinRoomModal(false)}
+          onJoinSuccess={(sess) => {
+            engine.switchSession(sess._id);
+          }}
+        />
+      )}
+
+      {engine.sessionsLoaded && !engine.sessionId && !engine.showSessionModal && !(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('session')) && (
         <div className="mdl">
           <div className="session-modal-box" style={{ maxWidth: 460, textAlign: 'center', padding: '36px 24px' }}>
             <div style={{ fontSize: 44, marginBottom: 12 }}>♠</div>
