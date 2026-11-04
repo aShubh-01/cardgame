@@ -39,6 +39,10 @@ export interface Round {
   cards?: PokerCard[];
   allIn?: Record<string, boolean>;
   potWinners?: Record<string, string[]>;
+  playerStatus?: Record<string, 'blind' | 'seen'>;
+  dealer?: string;
+  smallBlind?: { playerId: string; amt: number };
+  bigBlind?: { playerId: string; amt: number };
 }
 
 export interface HistEntry {
@@ -61,12 +65,15 @@ export interface GameState {
   rno: number;
   seq: number;
   tot: { rounds: number; total: number; big: number };
+  dealerIdx?: number;
+  blinds?: { sb: number; bb: number };
+  rummyConfig?: any;
 }
 
 export interface SessionDoc {
   _id: string;
   name: string;
-  gameType: 'tp' | 'pk';
+  gameType: 'tp' | 'pk' | 'rummy' | 'bj';
   status: 'active' | 'archived';
   balanceMode?: boolean;
   players?: Player[];
@@ -75,11 +82,12 @@ export interface SessionDoc {
   wins?: Record<string, number>;
   hist?: HistEntry[];
   tot?: { rounds: number; total: number; big: number };
+  rummyConfig?: any;
   createdAt?: string;
   updatedAt?: string;
 }
 
-export type GType = 'tp' | 'pk' | null;
+export type GType = 'tp' | 'pk' | 'rummy' | 'bj' | null;
 
 export const COL = ['#c1121f', '#1b8a6b', '#7b2cbf', '#e07a00', '#2563eb', '#d6336c', '#0f766e', '#6b7280'];
 export const STREETS = ['Pre-flop', 'Flop', 'Turn', 'River'];
@@ -104,3 +112,4 @@ export const esc = (s: any) =>
   String(s).replace(/[&<>"]/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] || c));
 
 export const money = (n: number) => '₹' + Number(n || 0).toLocaleString('en-IN');
+

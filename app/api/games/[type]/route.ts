@@ -35,9 +35,10 @@ export async function GET(
     await connectDB();
     const { type } = params;
 
-    if (type !== 'tp' && type !== 'pk') {
+    const validTypes = ['tp', 'pk', 'rummy', 'bj'];
+    if (!validTypes.includes(type)) {
       return NextResponse.json(
-        { error: 'Invalid game type. Use "tp" or "pk".' },
+        { error: 'Invalid game type. Use "tp", "pk", "rummy", or "bj".' },
         { status: 400 }
       );
     }
@@ -75,9 +76,10 @@ export async function PUT(
     await connectDB();
     const { type } = params;
 
-    if (type !== 'tp' && type !== 'pk') {
+    const validTypes = ['tp', 'pk', 'rummy', 'bj'];
+    if (!validTypes.includes(type)) {
       return NextResponse.json(
-        { error: 'Invalid game type. Use "tp" or "pk".' },
+        { error: 'Invalid game type. Use "tp", "pk", "rummy", or "bj".' },
         { status: 400 }
       );
     }
@@ -121,9 +123,10 @@ export async function DELETE(
     await connectDB();
     const { type } = params;
 
-    if (type !== 'tp' && type !== 'pk') {
+    const validTypes = ['tp', 'pk', 'rummy', 'bj'];
+    if (!validTypes.includes(type)) {
       return NextResponse.json(
-        { error: 'Invalid game type. Use "tp" or "pk".' },
+        { error: 'Invalid game type. Use "tp", "pk", "rummy", or "bj".' },
         { status: 400 }
       );
     }

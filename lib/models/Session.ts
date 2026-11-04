@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const SessionSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
   name: { type: String, required: true },
-  gameType: { type: String, required: true, enum: ['tp', 'pk'] },
+  gameType: { type: String, required: true, enum: ['tp', 'pk', 'rummy', 'bj'] },
   status: { type: String, enum: ['active', 'ended'], default: 'active' },
   userEmail: { type: String, default: null },
   players: { type: Array, default: [] },
@@ -23,7 +23,8 @@ const SessionSchema = new mongoose.Schema({
     rounds: { type: Number, default: 0 },
     total: { type: Number, default: 0 },
     big: { type: Number, default: 0 }
-  }
+  },
+  rummyConfig: { type: mongoose.Schema.Types.Mixed, default: null }
 }, { timestamps: true, minimize: false });
 
 SessionSchema.index({ userId: 1, gameType: 1 });

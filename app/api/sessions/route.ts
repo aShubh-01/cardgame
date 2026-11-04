@@ -30,44 +30,13 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const gameType = searchParams.get('gameType');
 
+    const validTypes = ['tp', 'pk', 'rummy', 'bj'];
     const query: any = { userId };
-    if (gameType && (gameType === 'tp' || gameType === 'pk')) {
+    if (gameType && validTypes.includes(gameType)) {
       query.gameType = gameType;
     }
 
-    let sessions = await Session.find(query).sort({ updatedAt: -1 }).lean();
-
-    // Auto-create default active sessions (Session #1) if none exist for this user
-    const hasTp = sessions.some((s: any) => s.gameType === 'tp');
-    const hasPk = sessions.some((s: any) => s.gameType === 'pk');
-
-    const toCreate: any[] = [];
-    if (!hasTp && (!gameType || gameType === 'tp')) {
-      toCreate.push({
-        userId,
-        userEmail: userId,
-        name: 'Teen Patti Session #1',
-        gameType: 'tp',
-        status: 'active',
-        ...FRESH_SESSION_DATA,
-      });
-    }
-    if (!hasPk && (!gameType || gameType === 'pk')) {
-      toCreate.push({
-        userId,
-        userEmail: userId,
-        name: 'Poker Session #1',
-        gameType: 'pk',
-        status: 'active',
-        ...FRESH_SESSION_DATA,
-      });
-    }
-
-    if (toCreate.length > 0) {
-      await Session.insertMany(toCreate);
-      sessions = await Session.find(query).sort({ updatedAt: -1 }).lean();
-    }
-
+    const sessions = await Session.find(query).sort({ updatedAt: -1 }).lean();
     return NextResponse.json(sessions);
   } catch (error) {
     console.error('GET /api/sessions error:', error);
@@ -87,12 +56,20 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { name, gameType, balanceMode, defaultBuyIn } = body;
 
-    if (!gameType || (gameType !== 'tp' && gameType !== 'pk')) {
-      return NextResponse.json({ error: 'Invalid gameType. Must be "tp" or "pk".' }, { status: 400 });
+    const validTypes = ['tp', 'pk', 'rummy', 'bj'];
+    if (!gameType || !validTypes.includes(gameType)) {
+      return NextResponse.json({ error: 'Invalid gameType. Must be "tp", "pk", "rummy", or "bj".' }, { status: 400 });
     }
 
+    const gameLabels: Record<string, string> = {
+      tp: 'Teen Patti',
+      pk: 'Poker',
+      rummy: 'Rummy',
+      bj: 'Blackjack',
+    };
+
     const sessionCount = await Session.countDocuments({ userId, gameType });
-    const sessionName = name?.trim() || `${gameType === 'pk' ? 'Poker' : 'Teen Patti'} Session #${sessionCount + 1}`;
+    const sessionName = name?.trim() || `${gameLabels[gameType] || 'Game'} Session #${sessionCount + 1}`;
 
     const newSession = await Session.create({
       userId,

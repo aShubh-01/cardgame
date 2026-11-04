@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const GameSchema = new mongoose.Schema({
   userId: { type: String, required: true, index: true },
-  gameType: { type: String, required: true, enum: ['tp', 'pk'] },
+  gameType: { type: String, required: true, enum: ['tp', 'pk', 'rummy', 'bj'] },
   players: { type: Array, default: [] },
   ante: {
     mode: { type: String, default: 'each' },
@@ -20,7 +20,8 @@ const GameSchema = new mongoose.Schema({
     rounds: { type: Number, default: 0 },
     total: { type: Number, default: 0 },
     big: { type: Number, default: 0 }
-  }
+  },
+  rummyConfig: { type: mongoose.Schema.Types.Mixed, default: null }
 }, { timestamps: true, minimize: false });
 
 GameSchema.index({ userId: 1, gameType: 1 }, { unique: true });
