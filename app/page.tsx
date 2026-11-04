@@ -103,7 +103,17 @@ export default function Home() {
   const colFn = (id: string) => COL[r.S.players.findIndex(p => p.id === id) % COL.length];
   const avFn = (id: string) => { const p = P(id); return `<div class="av" style="background:${colFn(id)}">${esc((p?.name[0] || '?').toUpperCase())}</div>`; };
   const R = () => r.S.round;
-  const pot = () => R() ? Object.values(R()!.contrib).reduce((a, b) => a + b, 0) : 0;
+  const getPots = () => {
+    const rd = R();
+    if (!rd) return { pots: [] as Pot[], totalPot: 0 };
+    return calculatePots(rd.contrib || {}, rd.folded || {});
+  };
+  const pot = () => {
+    const rd = R();
+    if (!rd) return 0;
+    if (r.G === 'pk') return getPots().totalPot;
+    return Object.values(rd.contrib || {}).reduce((a, b) => a + b, 0);
+  };
   const active = () => R() ? R()!.parts.filter(id => !R()!.folded[id]) : [];
 
   const render = useCallback(() => setTick(t => t + 1), []);
@@ -402,7 +412,15 @@ export default function Home() {
     const rd = R()!;
     const o = r.S.players.map(p => p.id).filter(id => rd.parts.includes(id));
     let i = o.indexOf(rd.turn);
-    for (let k = 0; k < o.length; k++) { i = (i + 1) % o.length; if (!rd.folded[o[i]]) { rd.turn = o[i]; return; } }
+    for (let k = 0; k < o.length; k++) {
+      i = (i + 1) % o.length;
+      if (!rd.folded[o[i]]) {
+        // In poker, all-in players cannot act
+        if (r.G === 'pk' && rd.allIn?.[o[i]]) continue;
+        rd.turn = o[i];
+        return;
+      }
+    }
   };
 
   const snap = () => {
@@ -428,8 +446,13 @@ export default function Home() {
     rd.acted = {}; // Acted in current round of betting
     rd.locked = false;
     rd.winners = [];
+    rd.potWinners = {};
+    rd.allIn = rd.allIn || {};
     rd.lastRaiser = null;
     rd.minRaise = r.S.ante.amt || 10;
+    // Set turn to first active player who is not all-in
+    const firstActive = rd.parts.find(id => !rd.allIn?.[id]);
+    if (firstActive) rd.turn = firstActive;
   };
 
   const startRound = () => {
@@ -448,7 +471,8 @@ export default function Home() {
     r.S.rno++;
     const rd: Round = r.S.round = {
       no: r.S.rno, phase: 'bet', parts: s.map(p => p.id), contrib: {}, folded: {},
-      turn: s[0].id, stake: 0, stack: [], log: [], lastBy: '', winner: null
+      turn: s[0].id, stake: 0, stack: [], log: [], lastBy: '', winner: null,
+      allIn: {}, potWinners: {}
     };
     s.forEach(p => {
       const e = document.getElementById('a_' + p.id) as HTMLInputElement;
@@ -457,9 +481,13 @@ export default function Home() {
       if (r.S.balanceMode) {
         actualBoot = Math.min(p.balance || 0, actualBoot);
         p.balance = Math.max(0, (p.balance || 0) - actualBoot);
+        if (p.balance === 0) {
+          rd.allIn = rd.allIn || {};
+          rd.allIn[p.id] = true;
+        }
       }
       rd.contrib[p.id] = actualBoot;
-      rd.log.push(p.name + ' boot ' + money(rd.contrib[p.id]));
+      rd.log.push(p.name + ' boot ' + money(rd.contrib[p.id]) + (rd.allIn?.[p.id] ? ' (all-in)' : ''));
     });
     // In Teen Patti & Poker, initial bet must be opened by players (not preset to boot)
     rd.stake = 0;
@@ -715,7 +743,7 @@ export default function Home() {
     return n;
   };
 
-  /* ── Poker actions (Real-world Texas Hold'em rules) ── */
+  /* ── Poker actions (Real-world Texas Hold'em rules with Main & Side Pots) ── */
   const pkAct = (t: string, a?: number) => {
     const rd = R()!;
     const id = rd.turn;
@@ -743,7 +771,10 @@ export default function Home() {
       if (remaining.length === 1) {
         rd.phase = 'result';
         rd.winners = [remaining[0]];
-        rd.log.push('🏆 Everyone folded! ' + P(remaining[0])!.name + ' wins the pot!');
+        const { pots } = getPots();
+        rd.potWinners = {};
+        pots.forEach(p => { rd.potWinners![p.id] = [remaining[0]]; });
+        rd.log.push('🏆 Everyone folded! ' + P(remaining[0])!.name + ' wins the entire pot!');
         render();
         return;
       }
@@ -755,23 +786,40 @@ export default function Home() {
         rd.log.push(me + ' checks');
       } else {
         let actualCall = toCall;
+        let isAllIn = false;
         if (r.S.balanceMode) {
           const p = P(id);
-          if (!p || (p.balance || 0) < toCall) {
+          const bal = p?.balance || 0;
+          if (!p || bal <= 0) {
             rd.stack.pop();
             return;
           }
-          actualCall = toCall;
-          p.balance = Math.max(0, (p.balance || 0) - actualCall);
+          if (bal < toCall) {
+            // Player goes all-in with fewer chips than the bet!
+            actualCall = bal;
+            p.balance = 0;
+            isAllIn = true;
+          } else {
+            actualCall = toCall;
+            p.balance = bal - actualCall;
+            if (p.balance === 0) isAllIn = true;
+          }
         }
-        rd.contrib[id] += actualCall;
+        rd.contrib[id] = (rd.contrib[id] || 0) + actualCall;
         rd.st = rd.st || {};
         rd.st[id] = sc + actualCall;
         rd.acted = rd.acted || {};
         rd.acted[id] = 1;
+        if (isAllIn) {
+          rd.allIn = rd.allIn || {};
+          rd.allIn[id] = true;
+        }
         const callBet = sc + actualCall;
-        rd.lastBy = me + ' called ' + money(callBet);
-        rd.log.push(me + ' called ' + money(callBet));
+        const msg = isAllIn
+          ? `${me} called ALL-IN for ${money(callBet)}! 🚨`
+          : `${me} called ${money(callBet)}`;
+        rd.lastBy = msg;
+        rd.log.push(msg);
         r.fx.fly = id;
         r.fx.bet = 1;
       }
@@ -783,19 +831,26 @@ export default function Home() {
         return;
       }
       let actualAdd = toAdd;
+      let isAllIn = false;
       if (r.S.balanceMode) {
         const p = P(id);
-        if (!p || (p.balance || 0) < toAdd) {
+        const bal = p?.balance || 0;
+        if (!p || bal < toAdd) {
           rd.stack.pop();
           return;
         }
         actualAdd = toAdd;
-        p.balance = Math.max(0, (p.balance || 0) - actualAdd);
+        p.balance = Math.max(0, bal - actualAdd);
+        if (p.balance === 0) isAllIn = true;
+      }
+      if (isAllIn) {
+        rd.allIn = rd.allIn || {};
+        rd.allIn[id] = true;
       }
       const isFirstBet = (rd.cur || 0) === 0;
       const newStreetBet = sc + actualAdd;
       const raiseSize = newStreetBet - (rd.cur || 0);
-      rd.contrib[id] += actualAdd;
+      rd.contrib[id] = (rd.contrib[id] || 0) + actualAdd;
       rd.st = rd.st || {};
       rd.st[id] = newStreetBet;
       rd.cur = newStreetBet;
@@ -804,34 +859,94 @@ export default function Home() {
       if (raiseSize > 0) {
         rd.minRaise = Math.max(rd.minRaise || 0, raiseSize);
       }
-      // Real-world rule: When someone raises, all other active players must react!
+      // When someone raises, all other active players who can act must react!
       rd.acted = { [id]: 1 };
-      rd.lastBy = me + (isFirstBet ? ' bet ' + money(newStreetBet) : ' raised to ' + money(newStreetBet));
-      rd.log.push(me + (isFirstBet ? ' bet ' + money(newStreetBet) : ' raised to ' + money(newStreetBet)));
+      const actionTxt = isAllIn
+        ? (isFirstBet ? ' bet ALL-IN ' : ' raised ALL-IN to ')
+        : (isFirstBet ? ' bet ' : ' raised to ');
+      rd.lastBy = me + actionTxt + money(newStreetBet);
+      rd.log.push(me + actionTxt + money(newStreetBet) + (isAllIn ? ' 🚨' : ''));
+      r.fx.fly = id;
+      r.fx.bet = 1;
+    } else if (t === 'allin') {
+      const p = P(id);
+      const bal = p?.balance || 0;
+      if (!p || bal <= 0) {
+        rd.stack.pop();
+        return;
+      }
+      const actualAdd = bal;
+      p.balance = 0;
+      rd.allIn = rd.allIn || {};
+      rd.allIn[id] = true;
+      const newStreetBet = sc + actualAdd;
+      rd.contrib[id] = (rd.contrib[id] || 0) + actualAdd;
+      rd.st = rd.st || {};
+      rd.st[id] = newStreetBet;
+      if (newStreetBet > (rd.cur || 0)) {
+        const raiseSize = newStreetBet - (rd.cur || 0);
+        rd.cur = newStreetBet;
+        rd.stake = newStreetBet;
+        rd.lastRaiser = id;
+        if (raiseSize > 0) {
+          rd.minRaise = Math.max(rd.minRaise || 0, raiseSize);
+        }
+        rd.acted = { [id]: 1 };
+      } else {
+        rd.acted = rd.acted || {};
+        rd.acted[id] = 1;
+      }
+      const msg = `${me} went ALL-IN for ${money(newStreetBet)}! 🚨`;
+      rd.lastBy = msg;
+      rd.log.push(msg);
       r.fx.fly = id;
       r.fx.bet = 1;
     }
 
     // CHECK IF BETTING LOOP IS COMPLETE:
-    // A loop is when the highest raised bet person ends up being the last person.
-    // All active players must have acted, and all active players must match the highest bet.
     const currentActive = rd.parts.filter(pId => !rd.folded[pId]);
-    const allActed = currentActive.every(pId => rd.acted && rd.acted[pId]);
-    const allMatched = currentActive.every(pId => (rd.st?.[pId] || 0) === (rd.cur || 0));
+    const canActPlayers = currentActive.filter(pId => !rd.allIn?.[pId]);
 
-    if (allActed && allMatched) {
+    const allActed = canActPlayers.every(pId => rd.acted && rd.acted[pId]);
+    const allMatched = canActPlayers.every(pId => (rd.st?.[pId] || 0) === (rd.cur || 0));
+
+    // If 0 or 1 player with chips remains and they've matched/acted, no further betting is possible
+    const noMoreBettingPossible = canActPlayers.length === 0 || (canActPlayers.length === 1 && allActed && allMatched);
+
+    if ((allActed && allMatched) || noMoreBettingPossible) {
+      if (noMoreBettingPossible && rd.street !== 3) {
+        // Run out all remaining board cards directly to River (street 3) & Showdown
+        rd.street = 3;
+        rd.phase = 'result';
+        rd.winners = [];
+        rd.potWinners = {};
+        const { pots } = getPots();
+        pots.forEach(p => {
+          if (p.eligiblePlayerIds.length === 1) rd.potWinners![p.id] = [p.eligiblePlayerIds[0]];
+        });
+        rd.log.push('— All players All-In! Board dealt to River · Showdown —');
+        render();
+        return;
+      }
+
       if (rd.street === 3) {
         // River betting complete -> Showdown
         rd.phase = 'result';
         rd.winners = [];
-        rd.log.push('— Showdown: Tap the winner(s) —');
+        rd.potWinners = {};
+        const { pots } = getPots();
+        pots.forEach(p => {
+          if (p.eligiblePlayerIds.length === 1) rd.potWinners![p.id] = [p.eligiblePlayerIds[0]];
+        });
+        rd.log.push('— Showdown: Tap the winner(s) of each pot —');
         render();
         return;
       }
+
       // Advance to next street:
-      // Loop 1 = Street 1 (Flop): Reveal 3 cards
-      // Loop 2 = Street 2 (Turn): Reveal 1 card (total 4)
-      // Loop 3 = Street 3 (River): Reveal 1 card (total 5)
+      // Street 1 = Flop (3 cards)
+      // Street 2 = Turn (4th card)
+      // Street 3 = River (5th card)
       rd.street = (rd.street || 0) + 1;
       rd.st = {};
       rd.acted = {};
@@ -844,8 +959,15 @@ export default function Home() {
       const desc = rd.street === 1 ? 'Loop 1: Flop revealed (3 cards open)' : rd.street === 2 ? 'Loop 2: Turn revealed (4th card open)' : 'Loop 3: River revealed (5th card open)';
       rd.lastBy = streetNames[rd.street] + ' dealt';
       rd.log.push(`— ${desc} —`);
-      // Standard poker rule: action begins with first active player in seating order
-      rd.turn = r.S.players.map(p => p.id).find(pId => rd.parts.includes(pId) && !rd.folded[pId])!;
+
+      // Action begins with first active, non-all-in player in seating order
+      const nextP = r.S.players.map(p => p.id).find(pId => rd.parts.includes(pId) && !rd.folded[pId] && !rd.allIn?.[pId]);
+      if (nextP) {
+        rd.turn = nextP;
+      } else {
+        rd.phase = 'result';
+        rd.winners = [];
+      }
     } else {
       nextTurn();
     }
@@ -855,6 +977,7 @@ export default function Home() {
   const pkRaise = () => {
     const rd = R()!;
     const cur = rd.cur || 0;
+    const sc = (rd.st?.[rd.turn]) || 0;
     const minInc = Math.max(rd.minRaise || 0, r.S.ante.amt || 10, 10);
     const e = document.getElementById('amt') as HTMLInputElement;
     const a = Math.max(0, +e?.value || 0);
@@ -866,8 +989,6 @@ export default function Home() {
       }
       pkAct('raise', a);
     } else {
-      // User enters how much they are giving in total!
-      // Must not let user raise less than or equal to current bet
       if (a <= cur) {
         const fallback = cur + minInc;
         if (e) {
@@ -882,25 +1003,92 @@ export default function Home() {
     }
   };
 
-  const pkShow = () => { const rd = R()!; snap(); rd.phase = 'result'; rd.winners = []; render(); };
+  const pkShow = () => {
+    const rd = R()!;
+    snap();
+    rd.phase = 'result';
+    rd.winners = [];
+    rd.potWinners = {};
+    const { pots } = getPots();
+    pots.forEach(p => {
+      if (p.eligiblePlayerIds.length === 1) rd.potWinners![p.id] = [p.eligiblePlayerIds[0]];
+    });
+    render();
+  };
+
+  const pickPotW = (potId: string, pId: string) => {
+    const rd = R();
+    if (!rd) return;
+    rd.potWinners = rd.potWinners || {};
+    const cur = rd.potWinners[potId] || [];
+    if (cur.includes(pId)) {
+      rd.potWinners[potId] = cur.filter(id => id !== pId);
+    } else {
+      rd.potWinners[potId] = [...cur, pId];
+    }
+    render();
+  };
+
+  const pickAllPotsForPlayer = (pId: string) => {
+    const rd = R();
+    if (!rd) return;
+    rd.potWinners = rd.potWinners || {};
+    const { pots } = getPots();
+    pots.forEach(p => {
+      if (p.eligiblePlayerIds.includes(pId)) {
+        rd.potWinners![p.id] = [pId];
+      }
+    });
+    render();
+  };
 
   const pkConfirm = () => {
-    const rd = R()!; const W = rd.winners || []; if (!W.length) return;
-    const pt = pot(); const n = W.length;
+    const rd = R()!;
+    const { pots, totalPot } = getPots();
+    if (!pots.length || totalPot <= 0) {
+      r.S.round = null;
+      render();
+      return;
+    }
+
+    // Determine winners for each pot:
+    const potWinners: Record<string, string[]> = {};
+    for (const pot of pots) {
+      if (pot.amount <= 0) continue;
+      let w = (rd.potWinners?.[pot.id] || []).filter(id => pot.eligiblePlayerIds.includes(id));
+      if (!w.length) {
+        if (pots.length === 1 && rd.winners?.length) {
+          w = rd.winners.filter(id => pot.eligiblePlayerIds.includes(id));
+        }
+        if (!w.length && pot.eligiblePlayerIds.length === 1) {
+          w = [pot.eligiblePlayerIds[0]];
+        }
+        if (!w.length) {
+          alert(`Please select at least one winner for ${pot.name} (${money(pot.amount)})`);
+          return;
+        }
+      }
+      potWinners[pot.id] = w;
+    }
+
+    const playerMap: Record<string, { name: string }> = {};
+    r.S.players.forEach(p => { playerMap[p.id] = { name: p.name }; });
+    const summary = distributePots(pots, potWinners, playerMap);
     const pays: { name: string; amt: number }[] = [];
 
     if (r.S.balanceMode) {
-      // Award pot to winners' chip stacks!
-      W.forEach((wId, idx) => {
-        const share = Math.floor(pt / n) + (idx === 0 ? pt % n : 0);
-        const winP = P(wId);
-        if (winP) {
-          winP.balance = (winP.balance || 0) + share;
+      // Award pot winnings to player chip stacks
+      Object.entries(summary.totalPlayerWins).forEach(([pId, won]) => {
+        const p = P(pId);
+        if (p && won > 0) {
+          p.balance = (p.balance || 0) + won;
         }
       });
       rd.parts.forEach(id => {
-        if (!W.includes(id)) {
-          pays.push({ name: P(id)!.name, amt: rd.contrib[id] });
+        const won = summary.totalPlayerWins[id] || 0;
+        const netAmt = won - (rd.contrib[id] || 0);
+        if (netAmt < 0) {
+          pays.push({ name: P(id)!.name, amt: -netAmt });
         }
       });
       // Pause any player who has busted out (balance <= 0)
@@ -914,8 +1102,7 @@ export default function Home() {
       // Debt tracking mode
       const nets: Record<string, number> = {};
       rd.parts.forEach(id => {
-        const k = W.indexOf(id);
-        nets[id] = (k < 0 ? 0 : Math.floor(pt / n) + (k === 0 ? pt % n : 0)) - rd.contrib[id];
+        nets[id] = (summary.totalPlayerWins[id] || 0) - (rd.contrib[id] || 0);
       });
       const cr = Object.entries(nets).filter(e => e[1] > 0);
       const tc = cr.reduce((a, e) => a + e[1], 0);
@@ -929,11 +1116,23 @@ export default function Home() {
       });
     }
 
-    W.forEach(c => r.S.wins[c] = (r.S.wins[c] || 0) + Math.floor(pt / n));
-    const wn = W.map(id => P(id)!.name).join(' & ');
-    r.S.tot.rounds++; r.S.tot.total += pt; r.S.tot.big = Math.max(r.S.tot.big, pt);
-    r.S.hist.unshift({ no: rd.no, winner: wn, pot: pt, got: pt, pays });
-    r.S.hist = r.S.hist.slice(0, 30); r.fx.win = [wn, pt]; r.S.round = null; render();
+    Object.entries(summary.totalPlayerWins).forEach(([wId, amt]) => {
+      r.S.wins[wId] = (r.S.wins[wId] || 0) + amt;
+    });
+
+    const winningNames = Object.entries(summary.totalPlayerWins)
+      .filter(([, amt]) => amt > 0)
+      .map(([id]) => P(id)!.name)
+      .join(' & ');
+
+    r.S.tot.rounds++;
+    r.S.tot.total += totalPot;
+    r.S.tot.big = Math.max(r.S.tot.big, totalPot);
+    r.S.hist.unshift({ no: rd.no, winner: winningNames || 'Split', pot: totalPot, got: totalPot, pays });
+    r.S.hist = r.S.hist.slice(0, 30);
+    r.fx.win = [winningNames, totalPot];
+    r.S.round = null;
+    render();
   };
 
   /* ── Drag reorder ── */
@@ -1058,6 +1257,8 @@ export default function Home() {
     window.pkRaise = pkRaise;
     window.pkShow = pkShow;
     window.pkConfirm = pkConfirm;
+    window.pickPotW = pickPotW;
+    window.pickAllPotsForPlayer = pickAllPotsForPlayer;
     window.openDebtModal = openDebtModal;
     window.closeDebtModal = closeDebtModal;
     window.settleAll = settleAll;
@@ -1239,6 +1440,8 @@ export default function Home() {
   const tableHTML = () => {
     const rd = R(); const n = r.S.players.length; const p = pot();
     const isBalMode = !!r.S.balanceMode;
+    const { pots, totalPot } = (r.G === 'pk' && rd) ? getPots() : { pots: [], totalPot: p };
+
     const seats = r.S.players.map((pl, i) => {
       const a = Math.PI / 2 + i * 2 * Math.PI / n;
       const x = Math.cos(a).toFixed(3), y = Math.sin(a).toFixed(3);
@@ -1248,22 +1451,52 @@ export default function Home() {
       const win = rd && rd.phase === 'result' && (rd.winner === pl.id || (rd.winners || []).includes(pl.id));
       const pk = rd && rd.phase === 'result' && inR && !f;
       const isBusted = isBalMode && (pl.balance || 0) <= 0;
+      const isAllIn = r.G === 'pk' && rd && !!rd.allIn?.[pl.id];
 
       let sa = '';
       if (rd) {
-        sa = !inR ? (isBusted ? 'Busted · Paused' : 'Sat out') : f ? 'FOLDED' : money(rd.contrib[pl.id] || 0);
+        if (!inR) {
+          sa = isBusted ? 'Busted · Paused' : 'Sat out';
+        } else if (f) {
+          sa = 'FOLDED';
+        } else if (isAllIn) {
+          sa = `ALL-IN (${money(rd.contrib[pl.id] || 0)})`;
+        } else {
+          sa = money(rd.contrib[pl.id] || 0);
+        }
       } else {
         sa = isBusted ? '💥 Busted (₹0) · Paused' : pl.sit ? 'Sitting out' : 'Ready';
       }
 
       const balDisplay = isBalMode ? `<div class="bal ${isBusted ? 'neg' : ''}">💰 ${money(pl.balance || 0)}</div>` : '';
       const rebuyBtn = isBalMode ? `<button class="rebuy-btn" onclick="openAddMoney('${pl.id}')">+ Add ₹</button>` : '';
+      const allInBadge = isAllIn ? '<div class="tg allin-tg">🚨 ALL-IN</div>' : '';
+      const turnBadge = turn ? '<div class="tg">▼ PLAYING NOW</div>' : '';
+      const bustedBadge = (isBusted && !isAllIn) ? '<div class="tg" style="background:#ef4444;color:#fff;border-color:#fca5a5">💥 BUSTED</div>' : '';
 
-      return `<div class="seat ${turn ? 'turn' : ''} ${f || (rd && !inR) || (!rd && pl.sit) || isBusted ? 'fold' : ''} ${isBusted ? 'busted' : ''} ${win ? 'win' : ''} ${pk ? 'pick' : ''}" data-seat="${pl.id}" style="left:calc(50% + (50% - var(--sx))*${x});top:calc(50% + (50% - var(--sy))*${y})" ${pk ? `onclick="pickW('${pl.id}')"` : ''}>${turn ? '<div class="tg">▼ PLAYING NOW</div>' : ''}${isBusted ? '<div class="tg" style="background:#ef4444;color:#fff;border-color:#fca5a5">💥 BUSTED</div>' : ''}${win ? '<div class="crown">👑</div>' : ''}${avFn(pl.id)}<div class="sn">${esc(pl.name)}</div><div class="sa ${isBusted ? 'neg' : ''}">${sa}</div>${balDisplay}${rebuyBtn}</div>`;
+      return `<div class="seat ${turn ? 'turn' : ''} ${f || (rd && !inR) || (!rd && pl.sit) || (isBusted && !inR) ? 'fold' : ''} ${isAllIn ? 'allin' : ''} ${isBusted && !inR ? 'busted' : ''} ${win ? 'win' : ''} ${pk ? 'pick' : ''}" data-seat="${pl.id}" style="left:calc(50% + (50% - var(--sx))*${x});top:calc(50% + (50% - var(--sy))*${y})" ${pk ? `onclick="pickW('${pl.id}')"` : ''}>${allInBadge || turnBadge || bustedBadge}${win ? '<div class="crown">👑</div>' : ''}${avFn(pl.id)}<div class="sn">${esc(pl.name)}</div><div class="sa ${isBusted && !isAllIn ? 'neg' : ''}">${sa}</div>${balDisplay}${rebuyBtn}</div>`;
     }).join('');
+
     const ch = '<b></b>'.repeat(Math.min(7, 1 + Math.floor(p / 150)));
     const cards = r.G === 'pk' ? (rd ? commHTML(rd) : '') : (rd && rd.phase !== 'ante' ? `<div class="cards ${r.fx.deal ? 'deal' : ''}"><i></i><i></i><i></i></div>` : '');
-    return `<div class="rail"><div class="felt"><div class="center">${rd && rd.phase === 'bet' ? `<div class="last ${r.fx.bet ? 'hit' : ''}">LAST BET <b>${money(rd.stake)}</b> <small>${esc(rd.lastBy || '')}</small></div>` : ''}<div class="plabel">${rd ? 'POT · ' + active().length + ' IN PLAY' : 'PLACE YOUR BETS'}</div><div class="pot" id="potn">${money(r.PP)}</div><div class="chips">${ch}</div>${cards}</div></div></div>${seats}`;
+
+    const potLabel = rd
+      ? (pots.length > 1
+          ? `TOTAL POT (${pots.length} POTS) · ${active().length} IN PLAY`
+          : `POT · ${active().length} IN PLAY`)
+      : 'PLACE YOUR BETS';
+    const potDisplay = r.G === 'pk' && rd ? totalPot : r.PP;
+    const potBadgesBar = (r.G === 'pk' && rd && pots.length > 1)
+      ? `<div class="pot-badges-bar">
+          ${pots.map((potItem, idx) => `
+            <span class="pot-badge ${idx === 0 ? 'main' : 'side'}" title="${potItem.name}: ${money(potItem.amount)} · Eligible: ${potItem.eligiblePlayerIds.map(id => nm(id)).join(', ')}">
+              ${potItem.name}: <b>${money(potItem.amount)}</b>
+            </span>
+          `).join('')}
+        </div>`
+      : '';
+
+    return `<div class="rail"><div class="felt"><div class="center">${rd && rd.phase === 'bet' ? `<div class="last ${r.fx.bet ? 'hit' : ''}">LAST BET <b>${money(rd.stake)}</b> <small>${esc(rd.lastBy || '')}</small></div>` : ''}<div class="plabel">${potLabel}</div><div class="pot" id="potn">${money(potDisplay)}</div>${potBadgesBar}<div class="chips">${ch}</div>${cards}</div></div></div>${seats}`;
   };
 
   const leftHTML = () => {
@@ -1317,6 +1550,28 @@ export default function Home() {
 
   const pkRight = (rd: Round) => {
     let top;
+    const { pots, totalPot } = getPots();
+    const hasSidePots = pots.length > 1;
+
+    const potBreakdownHTML = hasSidePots ? `
+      <div class="card" style="margin-bottom:10px;padding:10px 14px;background:rgba(0,0,0,0.3);border:1px solid rgba(244,195,79,0.25);border-radius:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:12px;font-weight:900;color:var(--gold);text-transform:uppercase;letter-spacing:1px">🏺 Pots Breakdown</span>
+          <span style="font-size:13px;font-weight:900;color:#fff">Total ${money(totalPot)}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${pots.map(p => `
+            <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.03);padding:5px 8px;border-radius:6px;font-size:12px">
+              <div>
+                <b style="color:${p.id === 'main' ? 'var(--gold)' : '#38bdf8'}">${p.name}: ${money(p.amount)}</b>
+                <div class="mut" style="font-size:10.5px">Eligible: ${p.eligiblePlayerIds.map(id => nm(id)).join(', ')}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : '';
+
     const ctl = `<div class="card"><h2>⚙ Round control</h2><div class="row"><button class="grow" ${rd.stack.length ? '' : 'disabled'} onclick="undo()">↩ Undo</button>${rd.phase === 'bet' ? '<button class="grow" onclick="pkShow()">🎴 Showdown</button>' : ''}<button class="grow bad" onclick="abort()">Abort</button></div>${rd.log.slice().reverse().slice(0, 5).map(l => `<div class="li mut">${esc(l)}</div>`).join('')}</div>`;
 
     if (rd.phase === 'bet') {
@@ -1327,7 +1582,7 @@ export default function Home() {
       const isBalMode = !!r.S.balanceMode;
       const p = P(id);
       const bal = p?.balance || 0;
-      const canCall = !isBalMode || bal >= tc;
+      const canCallFull = !isBalMode || bal >= tc;
       const cur = rd.cur || 0;
       const minInc = Math.max(rd.minRaise || 0, r.S.ante.amt || 10, 10);
       const streetNames = ['Pre-flop', 'Flop (Loop 1)', 'Turn (Loop 2)', 'River (Loop 3)'];
@@ -1337,10 +1592,10 @@ export default function Home() {
       const defaultVal = cur === 0 ? minInc : cur * 2;
       const presetMin = cur === 0 ? minInc : cur + minInc;
       const preset2x = cur === 0 ? minInc * 2 : cur * 2;
-      const presetHalfPot = cur === 0 ? Math.max(minInc, Math.round(pot() / 2)) : cur + Math.max(minInc, Math.round(pot() / 2));
-      const presetPot = cur === 0 ? Math.max(minInc, pot()) : cur + Math.max(minInc, pot());
+      const presetHalfPot = cur === 0 ? Math.max(minInc, Math.round(totalPot / 2)) : cur + Math.max(minInc, Math.round(totalPot / 2));
+      const presetPot = cur === 0 ? Math.max(minInc, totalPot) : cur + Math.max(minInc, totalPot);
 
-      top = `<div class="card slide">
+      top = potBreakdownHTML + `<div class="card slide">
         <div class="turnbox">
           ${avFn(id)}
           <div class="mut">${streetName} · now playing</div>
@@ -1348,17 +1603,18 @@ export default function Home() {
           <div class="mut">
             ${cur
               ? (tc > 0
-                  ? `To call ${money(cur)}${sc > 0 ? ` (you put in ${money(sc)}, add ${money(tc)})` : ''}`
-                  : `Current bet: ${money(cur)} (you matched)`)
-              : 'No bet yet (you can check or open)'
+                  ? `To call ${money(cur)}${sc > 0 ? ` (you put in ${money(sc)}, add ${money(tc)})` : ''}${isBalMode ? ` · stack: <b style="color:var(--gold)">${money(bal)}</b>` : ''}`
+                  : `Current bet: ${money(cur)} (you matched)${isBalMode ? ` · stack: <b style="color:var(--gold)">${money(bal)}</b>` : ''}`)
+              : `No bet yet (check or open)${isBalMode ? ` · stack: <b style="color:var(--gold)">${money(bal)}</b>` : ''}`
             }
           </div>
         </div>` + (r.ui.raise ?
           `<div style="margin-top:10px">
             <div class="mut" style="font-size:12px;margin-bottom:6px;text-align:center">
               ${cur === 0 ? 'Open bet amount (min ' + money(minInc) + '):' : 'Total amount you are giving (must be > ' + money(cur) + '):'}
+              ${isBalMode ? `<div style="font-size:11px;color:var(--gold);margin-top:2px">Your balance: <b>${money(bal)}</b></div>` : ''}
             </div>
-            <input id="amt" type="number" min="${cur === 0 ? minInc : cur + 1}" value="${defaultVal}" oninput="updateRaisePreview()" style="width:100%;text-align:center;font-size:24px;font-weight:900">
+            <input id="amt" type="number" min="${cur === 0 ? minInc : cur + 1}" max="${isBalMode ? sc + bal : ''}" value="${defaultVal}" oninput="updateRaisePreview()" style="width:100%;text-align:center;font-size:24px;font-weight:900">
             ${cur > 0 ? `
               <div style="background:rgba(0,0,0,0.3);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:10px 0;font-size:13px;line-height:1.5">
                 <div style="display:flex;justify-content:space-between">
@@ -1380,6 +1636,7 @@ export default function Home() {
               <button class="sm" onclick="setAmt(${preset2x})">2× (${money(preset2x)})</button>
               <button class="sm" onclick="setAmt(${presetHalfPot})">½ Pot (${money(presetHalfPot)})</button>
               <button class="sm" onclick="setAmt(${presetPot})">Pot (${money(presetPot)})</button>
+              ${isBalMode && bal > 0 ? `<button class="sm" style="border-color:#ef4444;color:#ef4444" onclick="setAmt(${sc + bal})">🚨 All-In (${money(bal)})</button>` : ''}
             </div>
             <div class="row" style="margin-top:10px">
               <button id="pk-confirm-btn" class="gold grow" onclick="pkRaise()">
@@ -1391,15 +1648,98 @@ export default function Home() {
           `<div class="acts">
             ${canCheck
               ? `<button class="pri big" style="grid-column:1/-1" onclick="pkAct('check')">✋ Check</button>`
-              : `<button class="good big" style="grid-column:1/-1" ${canCall ? '' : 'disabled'} title="${!canCall ? 'Insufficient chips: you have ' + money(bal) + ', need ' + money(tc) + ' to Call' : ''}" onclick="pkAct('call')">📞 Call ${money(cur)}${tc !== cur ? ` (Put in ${money(tc)})` : ''}</button>`
+              : (isBalMode && !canCallFull
+                  ? `<button class="bad big" style="grid-column:1/-1;background:linear-gradient(#dc2626,#991b1b);border-color:#fca5a5" onclick="pkAct('call')">🚨 Call ALL-IN ${money(bal)} (all your chips)</button>`
+                  : `<button class="good big" style="grid-column:1/-1" onclick="pkAct('call')">📞 Call ${money(cur)}${tc !== cur ? ` (Put in ${money(tc)})` : ''}</button>`)
             }
             <button class="gold" onclick="toggleRaise()">${cur === 0 ? '💰 Open Bet' : '⬆ Raise'}</button>
             <button class="bad" onclick="pkAct('fold')">🏳 Fold</button>
+            ${isBalMode && bal > 0 && cur === 0 ? `<button class="bad" style="grid-column:1/-1;border:1px solid #ef4444" onclick="pkAct('allin')">🚨 Shove ALL-IN ${money(bal)}</button>` : ''}
           </div>`) +
         `</div>`;
     } else {
-      const c = active(); const W = rd.winners || [];
-      top = `<div class="card slide"><h2>🏆 Showdown</h2><p class="mut" style="margin:0 0 8px">${c.length === 1 ? 'Everyone else folded.' : 'Tap the winner(s). Tap several for a split pot.'}</p>${c.map(id => `<div class="opt ${W.includes(id) ? 'sel' : ''}" onclick="pickW('${id}')">${avFn(id)}<div class="grow"><b>${nm(id)}</b><div class="mut">Wagered ${money(rd.contrib[id])}</div></div>${W.includes(id) ? '🏆' : ''}</div>`).join('')}${W.length ? `<p style="margin:8px 0">Pot ${money(pot())} → ${W.length > 1 ? 'split ' + W.length + ' ways' : nm(W[0]) + ' receives ' + money(pot() - rd.contrib[W[0]]) + ' from the others'}</p>` : ''}<button class="pri big" ${W.length ? '' : 'disabled'} onclick="pkConfirm()">✅ Confirm &amp; settle</button></div>`;
+      const c = active();
+      if (!hasSidePots) {
+        // Single Pot Showdown
+        const pot0 = pots[0] || { id: 'main', name: 'Main Pot', amount: totalPot, eligiblePlayerIds: c };
+        const W = (rd.potWinners?.['main'] || rd.winners || []);
+        top = `<div class="card slide">
+          <h2>🏆 Showdown</h2>
+          <p class="mut" style="margin:0 0 8px">${c.length === 1 ? 'Everyone else folded.' : 'Tap the winner(s). Tap several for a split pot.'}</p>
+          ${c.map(id => `
+            <div class="opt ${W.includes(id) ? 'sel' : ''}" onclick="pickPotW('main', '${id}')">
+              ${avFn(id)}
+              <div class="grow">
+                <b>${nm(id)}</b>
+                <div class="mut">Wagered ${money(rd.contrib[id] || 0)}</div>
+              </div>
+              ${W.includes(id) ? '🏆' : ''}
+            </div>
+          `).join('')}
+          ${W.length ? `<p style="margin:8px 0">Pot ${money(totalPot)} → ${W.length > 1 ? 'split ' + W.length + ' ways' : nm(W[0]) + ' receives ' + money(totalPot - (rd.contrib[W[0]] || 0)) + ' from the others'}</p>` : ''}
+          <button class="pri big" ${W.length ? '' : 'disabled'} onclick="pkConfirm()">✅ Confirm &amp; settle</button>
+        </div>`;
+      } else {
+        // Multi-Pot Showdown
+        const allPotsHaveWinners = pots.every(p => p.amount <= 0 || (rd.potWinners?.[p.id] || []).length > 0);
+        top = `<div class="card slide">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <h2 style="margin:0">🏆 Showdown · Multiple Pots</h2>
+            <span style="font-size:14px;font-weight:900;color:var(--gold)">Total ${money(totalPot)}</span>
+          </div>
+          <p class="mut" style="margin:0 0 10px;font-size:12px;line-height:1.4">
+            Side pots formed! Select winner(s) for each pot independently. Only players who contributed to a pot are eligible to win it.
+          </p>
+
+          <div style="display:flex;flex-direction:column;gap:10px">
+            ${pots.map(potItem => {
+              const selected = rd.potWinners?.[potItem.id] || [];
+              return `
+                <div class="pot-box" style="background:rgba(0,0,0,0.35);border:1px solid rgba(244,195,79,0.3);border-radius:10px;padding:8px 10px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                    <span style="font-weight:900;font-size:13px;color:var(--gold)">🏺 ${potItem.name}: <b>${money(potItem.amount)}</b></span>
+                    <span class="mut" style="font-size:11px">${potItem.eligiblePlayerIds.length} eligible</span>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                    ${c.map(id => {
+                      const isEligible = potItem.eligiblePlayerIds.includes(id);
+                      const isWinner = selected.includes(id);
+                      return `
+                        <button
+                          class="opt-btn ${isWinner ? 'sel' : ''} ${!isEligible ? 'dis' : ''}"
+                          ${isEligible ? `onclick="pickPotW('${potItem.id}', '${id}')"` : 'disabled title="Ineligible: all-in at a lower tier"'}
+                          style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:8px;text-align:left;font-size:11.5px;cursor:${isEligible ? 'pointer' : 'not-allowed'};opacity:${isEligible ? 1 : 0.35};background:${isWinner ? 'rgba(34,197,94,0.22)' : 'rgba(255,255,255,0.04)'};border:1px solid ${isWinner ? '#22c55e' : 'rgba(255,255,255,0.1)'}"
+                        >
+                          ${dtAvFn(id)}
+                          <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                            <b>${nm(id)}</b>
+                            <div style="font-size:9.5px;opacity:.8">${isEligible ? (isWinner ? '🏆 Winner' : 'Eligible') : 'Ineligible'}</div>
+                          </div>
+                        </button>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.1)">
+            <div class="mut" style="font-size:11px;margin-bottom:5px">Quick Pick: Best Hand Overall (All Eligible Pots)</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap">
+              ${c.map(id => `
+                <button class="sm" onclick="pickAllPotsForPlayer('${id}')" title="Award all pots ${nm(id)} is eligible for">
+                  👑 ${nm(id)}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <button class="pri big" style="margin-top:12px" ${allPotsHaveWinners ? '' : 'disabled'} onclick="pkConfirm()">
+            ${allPotsHaveWinners ? '✅ Confirm &amp; Settle All Pots' : '⚠️ Pick Winner(s) for Each Pot'}
+          </button>
+        </div>`;
+      }
     }
     return top + ctl;
   };
