@@ -878,3 +878,371 @@ body[data-v=pk] .session-card.active {
   box-shadow: 0 8px 24px rgba(255, 255, 255, 0.25) !important;
   background: #f9fafb !important;
 }
+
+/* ── Presence (online / disconnected) ── */
+.presence-dot{position:absolute;right:-1px;bottom:-1px;width:12px;height:12px;border-radius:50%;border:2px solid #12060a;z-index:2}
+.presence-dot.on{background:#22c55e;box-shadow:0 0 8px rgba(34,197,94,.8)}
+.presence-dot.off{background:#6b7280}
+.pr.pr-offline{opacity:.55;border-style:dashed;border-color:rgba(239,68,68,.35)}
+.pr.pr-offline .av{filter:grayscale(1)}
+.seat.offline{opacity:.5;filter:grayscale(.85);border-style:dashed}
+
+/* ── Live Table Chat ── */
+.chat-fab{position:fixed;right:22px;bottom:22px;z-index:60;width:62px;height:62px;border-radius:50%!important;padding:0!important;font-size:26px!important;background:radial-gradient(circle at 35% 30%,#ffe48f,#f4c34f 55%,#a8741a)!important;color:#1f0e00!important;border:3px dashed rgba(255,255,255,.85)!important;box-shadow:0 10px 26px rgba(0,0,0,.75),0 0 18px rgba(244,195,79,.4)!important}
+.chat-fab-badge{position:absolute;top:-4px;right:-4px;min-width:22px;height:22px;padding:0 6px;border-radius:999px;background:#dc2626;color:#fff;font-size:12px;font-weight:900;display:grid;place-items:center;border:2px solid #fff;animation:bn .6s infinite alternate}
+.chat-panel{position:fixed;right:22px;bottom:96px;z-index:60;width:min(92vw,370px);height:min(70vh,520px);display:flex;flex-direction:column;background:linear-gradient(165deg,rgba(44,18,26,.97),rgba(14,5,9,.98));border:1.5px solid rgba(244,195,79,.45);border-radius:20px;box-shadow:0 24px 60px rgba(0,0,0,.85),0 0 24px rgba(244,195,79,.2);overflow:hidden;animation:sl .22s}
+.chat-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(244,195,79,.22);font:800 14px Georgia,serif;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold)}
+.chat-live-dot{font:800 11px "Trebuchet MS",sans-serif;color:#4ade80;letter-spacing:.5px;animation:blink 1.4s steps(2) infinite}
+.chat-list{flex:1;overflow-y:auto;padding:12px 12px 6px;display:flex;flex-direction:column;gap:6px}
+.chat-empty{margin:auto;color:var(--mut);font-size:13.5px;text-align:center}
+.chat-row{display:flex;gap:8px;align-items:flex-end;max-width:88%}
+.chat-row.mine{align-self:flex-end;flex-direction:row-reverse}
+.chat-row.grouped{margin-top:-2px}
+.chat-row.grouped:not(.mine){padding-left:38px}
+.chat-av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:900;font-size:13px;flex:none;border:1.5px solid var(--gold)}
+.chat-bubble-wrap{display:flex;flex-direction:column;gap:2px;min-width:0}
+.chat-row.mine .chat-bubble-wrap{align-items:flex-end}
+.chat-meta{display:flex;gap:6px;align-items:baseline;font-size:11.5px;color:var(--mut)}
+.chat-meta b{color:var(--ink);font-size:12.5px}
+.chat-bubble{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);padding:8px 12px;border-radius:16px 16px 16px 4px;font-size:14.5px;line-height:1.35;color:var(--ink);word-break:break-word}
+.chat-row.mine .chat-bubble{background:linear-gradient(135deg,#f4c34f,#b87d14);color:#1f0e00;border-color:#fff0b3;border-radius:16px 16px 4px 16px;font-weight:700}
+.chat-bubble.go{border-color:rgba(244,195,79,.6);background:rgba(244,195,79,.12)}
+.chat-quick{display:flex;gap:6px;overflow-x:auto;padding:6px 10px;border-top:1px solid rgba(244,195,79,.12)}
+.chat-quick button{flex:none;padding:5px 11px!important;font-size:13px!important;border-radius:999px}
+.chat-input-row{display:flex;gap:8px;padding:10px 12px 12px}
+.chat-input-row input{flex:1;font-size:15px;padding:10px 14px}
+.chat-input-row button{width:46px;height:46px;padding:0!important;border-radius:50%!important;font-size:18px!important}
+@media(max-width:600px){.chat-fab{right:14px;bottom:14px;width:54px;height:54px}.chat-panel{right:8px;left:8px;width:auto;bottom:80px}}
+
+/* ── Casino Theme Interactables & 3D Clay Poker Chips ── */
+.casino-chips-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px 4px 12px;
+  justify-content: center;
+  align-items: center;
+  -webkit-overflow-scrolling: touch;
+}
+.casino-chips-strip::-webkit-scrollbar {
+  height: 4px;
+}
+.casino-chips-strip::-webkit-scrollbar-thumb {
+  background: rgba(244,195,79,0.3);
+  border-radius: 99px;
+}
+
+.casino-chip-item {
+  position: relative;
+  min-width: 52px;
+  min-height: 52px;
+  width: 54px;
+  height: 54px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 2px !important;
+  cursor: pointer;
+  border: 2.5px dashed rgba(255, 255, 255, 0.9) !important;
+  outline: 1.5px solid rgba(255, 248, 220, 0.5) !important;
+  outline-offset: -5px !important;
+  box-shadow: 0 5px 12px rgba(0, 0, 0, 0.75), inset 0 2px 3px rgba(255, 255, 255, 0.45), inset 0 -2px 4px rgba(0, 0, 0, 0.6) !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9) !important;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, filter 0.2s ease !important;
+  user-select: none;
+  flex-shrink: 0;
+}
+.casino-chip-item:hover:not(:disabled) {
+  transform: translateY(-4px) scale(1.06) !important;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.85), 0 0 16px rgba(244, 195, 79, 0.5), inset 0 2px 4px rgba(255, 255, 255, 0.6) !important;
+  filter: brightness(1.15) !important;
+}
+.casino-chip-item:active:not(:disabled) {
+  transform: translateY(2px) scale(0.96) !important;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6), inset 0 3px 8px rgba(0, 0, 0, 0.8) !important;
+}
+.casino-chip-item:disabled {
+  opacity: 0.32 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(0.8) !important;
+}
+
+.casino-chip-item .chip-lbl {
+  font: 900 8.5px/1 "Trebuchet MS", sans-serif;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.88);
+}
+.casino-chip-item .chip-val {
+  font: 900 11.5px/1.1 Georgia, "Times New Roman", serif;
+  color: #ffffff;
+  margin-top: 1px;
+}
+
+/* Chip Colors */
+.chip-red {
+  background: radial-gradient(circle at 35% 30%, #f87171, #dc2626 55%, #7f1d1d 100%) !important;
+}
+.chip-blue {
+  background: radial-gradient(circle at 35% 30%, #60a5fa, #2563eb 55%, #1e3a8a 100%) !important;
+}
+.chip-green {
+  background: radial-gradient(circle at 35% 30%, #34d399, #059669 55%, #064e3b 100%) !important;
+}
+.chip-purple {
+  background: radial-gradient(circle at 35% 30%, #c084fc, #7c3aed 55%, #4c1d95 100%) !important;
+}
+.chip-black {
+  background: radial-gradient(circle at 35% 30%, #52525b, #18181b 58%, #09090b 100%) !important;
+  border-color: #fde047 !important;
+  outline-color: rgba(250, 204, 21, 0.75) !important;
+}
+.chip-allin {
+  background: radial-gradient(circle at 35% 30%, #fbbf24, #ef4444 50%, #991b1b 100%) !important;
+  border-color: #fef08a !important;
+  outline-color: #ffffff !important;
+  animation: pulse-glow 1.6s infinite alternate !important;
+}
+@keyframes pulse-glow {
+  0% { box-shadow: 0 0 12px rgba(239, 68, 68, 0.6), inset 0 2px 4px rgba(255,255,255,0.45); }
+  100% { box-shadow: 0 0 28px rgba(245, 158, 11, 0.9), 0 0 40px rgba(239, 68, 68, 0.5), inset 0 2px 6px rgba(255,255,255,0.8); }
+}
+
+/* Casino Dealer Podium Counter Box */
+.casino-counter-box {
+  background: linear-gradient(175deg, rgba(20, 8, 13, 0.95), rgba(8, 3, 5, 0.98));
+  border: 2px solid var(--gold);
+  border-radius: 18px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 248, 220, 0.2), inset 0 0 18px rgba(0, 0, 0, 0.5);
+  margin-top: 10px;
+}
+.casino-counter-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.casino-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1.5px solid rgba(244, 195, 79, 0.45);
+  border-radius: 14px;
+  padding: 4px 8px;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.9);
+}
+.casino-input-wrap .currency-sym {
+  font: 900 20px Georgia, serif;
+  color: var(--gold);
+  margin-left: 6px;
+}
+.casino-input-wrap input {
+  flex: 1;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #fff;
+  font: 900 22px "Courier New", monospace !important;
+  letter-spacing: 1px;
+  text-align: center;
+  padding: 6px 8px !important;
+}
+.casino-input-wrap .clear-btn {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: none !important;
+  color: var(--mut) !important;
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  font-size: 14px !important;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.casino-input-wrap .clear-btn:hover {
+  background: rgba(239, 68, 68, 0.3) !important;
+  color: #fff !important;
+}
+
+/* Big High-Roller Casino Action Buttons */
+.casino-hero-btn {
+  width: 100%;
+  padding: 14px 18px !important;
+  font: 900 16px Georgia, "Trebuchet MS", serif !important;
+  letter-spacing: 0.8px;
+  border-radius: 16px !important;
+  text-transform: uppercase;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 10px !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.casino-hero-btn.hero-chaal {
+  background: linear-gradient(135deg, #fff0b3 0%, #f4c34f 45%, #b87d14 100%) !important;
+  color: #1f0e00 !important;
+  border: 2px solid #fff5cc !important;
+  box-shadow: 0 8px 24px rgba(244, 195, 79, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.7) !important;
+}
+.casino-hero-btn.hero-allin {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 45%, #991b1b 100%) !important;
+  color: #ffffff !important;
+  border: 2px solid #fca5a5 !important;
+  box-shadow: 0 8px 26px rgba(239, 68, 68, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.5) !important;
+  animation: pulse-glow 1.4s infinite alternate !important;
+}
+.casino-hero-btn:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.02) !important;
+  filter: brightness(1.12) !important;
+}
+.casino-hero-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98) !important;
+}
+
+/* Big prominent See Cards button */
+.see-cards-cta {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 50%, #075985 100%) !important;
+  color: #ffffff !important;
+  border: 2px solid #38bdf8 !important;
+  border-radius: 16px !important;
+  font: 900 15px Georgia, "Trebuchet MS", sans-serif !important;
+  letter-spacing: 1px !important;
+  box-shadow: 0 6px 20px rgba(2, 132, 199, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+  transition: all 0.2s ease !important;
+}
+.see-cards-cta:hover {
+  transform: translateY(-2px) scale(1.02) !important;
+  box-shadow: 0 10px 28px rgba(56, 189, 248, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+  border-color: #bae6fd !important;
+}
+
+/* ── Game Operator Top Command Center ── */
+.go-top-container {
+  width: min(98%, 1800px);
+  margin: 10px auto 0;
+  background: linear-gradient(175deg, rgba(34, 14, 21, 0.98), rgba(12, 4, 8, 0.99));
+  border: 1.5px solid rgba(244, 195, 79, 0.4);
+  border-radius: 18px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 24px rgba(244, 195, 79, 0.12);
+  overflow: hidden;
+  transition: all 0.25s ease;
+  z-index: 40;
+  position: relative;
+}
+.go-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid rgba(244, 195, 79, 0.18);
+  background: rgba(0, 0, 0, 0.35);
+}
+.go-top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.go-top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.go-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f7d97e, #c9962c);
+  color: #1a0f02;
+  font: 900 11.5px Georgia, serif;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.go-tab-btn {
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  padding: 6px 12px !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: #cbd5e1 !important;
+  transition: all 0.18s ease !important;
+}
+.go-tab-btn:hover {
+  background: rgba(244, 195, 79, 0.15) !important;
+  border-color: rgba(244, 195, 79, 0.5) !important;
+  color: var(--gold) !important;
+}
+.go-tab-btn.active {
+  background: linear-gradient(135deg, rgba(244, 195, 79, 0.28), rgba(212, 175, 55, 0.15)) !important;
+  border-color: var(--gold) !important;
+  color: var(--gold) !important;
+  box-shadow: 0 0 12px rgba(244, 195, 79, 0.25) !important;
+}
+.go-panel-body {
+  padding: 16px;
+  animation: sl 0.22s ease-out;
+}
+.go-player-surveillance-card {
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(244, 195, 79, 0.25);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+.go-player-surveillance-card:hover {
+  border-color: rgba(244, 195, 79, 0.55);
+  transform: translateY(-2px);
+}
+.go-select-box {
+  background: #18090f !important;
+  border: 1.5px solid var(--gold) !important;
+  color: #fef08a !important;
+  font-weight: 800 !important;
+  font-size: 14px !important;
+  padding: 9px 14px !important;
+  border-radius: 12px !important;
+  cursor: pointer !important;
+  outline: none !important;
+}
+.go-select-box option {
+  background: #18090f !important;
+  color: #fef08a !important;
+  padding: 8px !important;
+}
+
+/* Kick Button */
+.kick-btn {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.18), rgba(185, 28, 28, 0.25)) !important;
+  border: 1.5px solid #ef4444 !important;
+  color: #fca5a5 !important;
+  font-weight: 800 !important;
+  border-radius: 999px !important;
+  transition: all 0.18s ease !important;
+}
+.kick-btn:hover {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4) !important;
+  transform: translateY(-1px) scale(1.04) !important;
+}
+
+

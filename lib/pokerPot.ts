@@ -49,7 +49,25 @@ function normalizeFolded(
 }
 
 /**
+ * Normalizes all-in input to a Set of player IDs.
+ */
+function normalizeAllIn(
+  allIn: Record<string, boolean> | string[] | Set<string> = []
+): Set<string> {
+  if (allIn instanceof Set) return allIn;
+  if (Array.isArray(allIn)) return new Set(allIn);
+  const s = new Set<string>();
+  for (const [k, v] of Object.entries(allIn)) {
+    if (v) s.add(k);
+  }
+  return s;
+}
+
+/**
  * Dynamically calculates the Main Pot and all Side Pots based on player contributions.
+ *
+ * Side pots are ONLY created when an active player goes ALL IN with fewer chips than others.
+ * If nobody is all-in, all contributions form a single Main Pot for all non-folded players.
  *
  * Folded players' chips remain in the pot, but folded players are never eligible to win.
  * Pots with identical eligible player sets are consolidated so players don't face
@@ -59,7 +77,8 @@ function normalizeFolded(
  */
 export function calculatePots(
   contributions: Record<string, number>,
-  folded: Record<string, any> | string[] | Set<string> = []
+  folded: Record<string, any> | string[] | Set<string> = [],
+  allIn?: Record<string, boolean> | string[] | Set<string>
 ): PotCalculationResult {
   const foldedSet = normalizeFolded(folded);
   const seedAmount = Math.max(0, Number(contributions['__pot_seed__'] || 0));
@@ -107,8 +126,40 @@ export function calculatePots(
     };
   }
 
-  // Get all unique positive contribution levels sorted ascending
-  const levels = Array.from(new Set(validEntries.map(([, amt]) => amt))).sort((a, b) => a - b);
+  // When allIn is provided: side pots are ONLY formed if at least one contributing player went all-in
+  if (allIn !== undefined) {
+    const allInSet = normalizeAllIn(allIn);
+    const hasAnyAllIn = validEntries.some(([id]) => allInSet.has(id));
+
+    if (!hasAnyAllIn) {
+      return {
+        pots: [
+          {
+            id: 'main',
+            name: 'Main Pot',
+            amount: totalPot,
+            eligiblePlayerIds: allNonFoldedPlayers,
+            contributorIds: validEntries.map(([id]) => id),
+            tierCap: Infinity,
+          },
+        ],
+        totalPot,
+      };
+    }
+  }
+
+  // Determine contribution tiers (capped at each distinct all-in contribution level)
+  let levels: number[];
+  if (allIn !== undefined) {
+    const allInSet = normalizeAllIn(allIn);
+    const allInLevels = validEntries
+      .filter(([id]) => allInSet.has(id))
+      .map(([, amt]) => amt);
+    const maxContrib = Math.max(...validEntries.map(([, amt]) => amt));
+    levels = Array.from(new Set([...allInLevels, maxContrib])).sort((a, b) => a - b);
+  } else {
+    levels = Array.from(new Set(validEntries.map(([, amt]) => amt))).sort((a, b) => a - b);
+  }
 
   interface RawTier {
     amount: number;

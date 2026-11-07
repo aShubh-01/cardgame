@@ -17,6 +17,7 @@ const SessionSchema = new mongoose.Schema({
   gameOperatorUserId: { type: String, default: null },
   nextGameOperatorUserId: { type: String, default: null },
   goLastHeartbeat: { type: Number, default: 0 },
+  goDisconnectedAt: { type: Number, default: 0 },
   goDisconnectEvent: { type: mongoose.Schema.Types.Mixed, default: null },
   readyPlayers: { type: Object, default: {} },
   activityLog: { type: Array, default: [] },
@@ -39,7 +40,8 @@ const SessionSchema = new mongoose.Schema({
   dealerRequests: { type: Array, default: [] },
   chatMessages: { type: Array, default: [] },
   bjDealerId: { type: String, default: null },
-  bjDealerRotation: { type: Boolean, default: false }
+  bjDealerRotation: { type: Boolean, default: false },
+  playerBets: { type: mongoose.Schema.Types.Mixed, default: {} }
 }, { timestamps: true, minimize: false });
 
 SessionSchema.index({ userId: 1, gameType: 1 });

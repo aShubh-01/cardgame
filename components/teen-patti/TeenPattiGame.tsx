@@ -11,6 +11,7 @@ import GoogleConfigModal from '@/components/common/GoogleConfigModal';
 import ConfirmModal from '@/components/common/ConfirmModal';
 import JoinRoomModal from '@/components/common/JoinRoomModal';
 import OperatorModals from '@/components/common/OperatorModals';
+import LiveChat from '@/components/common/LiveChat';
 import TeenPattiTable from '@/components/teen-patti/TeenPattiTable';
 import TeenPattiControls from '@/components/teen-patti/TeenPattiControls';
 import { useGameEngine } from '@/hooks/useGameEngine';
@@ -39,11 +40,11 @@ export default function TeenPattiGame() {
     sessionMode !== 'online'
       ? true
       : gameState.isGameOperator !== undefined
-      ? Boolean(gameState.isGameOperator)
-      : Boolean(
+        ? Boolean(gameState.isGameOperator)
+        : Boolean(
           myEmail &&
-            (engine.currentSessionDoc?.gameOperatorUserId || engine.currentSessionDoc?.hostUserId)?.toLowerCase() ===
-              myEmail.toLowerCase()
+          (engine.currentSessionDoc?.gameOperatorUserId || engine.currentSessionDoc?.hostUserId)?.toLowerCase() ===
+          myEmail.toLowerCase()
         );
 
   const potTotal = rd
@@ -88,6 +89,8 @@ export default function TeenPattiGame() {
       const allIn = { ...(currentRd.allIn || {}) };
       const log = [...currentRd.log];
       let stake = currentRd.stake || 0;
+      let lastBetAmt = currentRd.lastBetAmt || 0;
+      let lastIsBlind = currentRd.lastIsBlind !== undefined ? currentRd.lastIsBlind : true;
       let lastBy = currentRd.lastBy;
       let turn = currentRd.turn;
       let phase = currentRd.phase;
@@ -115,8 +118,12 @@ export default function TeenPattiGame() {
         }
 
         const isBlind = (currentRd.playerStatus?.[id] || 'blind') === 'blind';
+        lastBetAmt = actual;
+        lastIsBlind = isBlind;
         if (t === 'raise') {
           stake = Math.max(stake, calcTeenPattiNewBaseStake(actual, isBlind));
+        } else if (t === 'bet') {
+          stake = isBlind ? actual : Math.max(1, Math.floor(actual / 2));
         }
 
         contrib[id] = (contrib[id] || 0) + actual;
@@ -124,8 +131,8 @@ export default function TeenPattiGame() {
         const actionTxt = isAllIn
           ? ` went ALL-IN with ${money(actual)} (${isBlind ? 'Blind' : 'Seen'}) 🚨`
           : t === 'raise'
-          ? ` raised to ${money(actual)} (${isBlind ? 'Blind' : 'Seen'})`
-          : ` called chaal ${money(actual)} (${isBlind ? 'Blind' : 'Seen'})`;
+            ? ` raised to ${money(actual)} (${isBlind ? 'Blind' : 'Seen'})`
+            : ` called chaal ${money(actual)} (${isBlind ? 'Blind' : 'Seen'})`;
         log.push(me + actionTxt);
 
         const activeIds = currentRd.parts.filter(pId => !folded[pId]);
@@ -173,7 +180,7 @@ export default function TeenPattiGame() {
           if (nextBal === 0) allIn[id] = true;
         }
         contrib[id] = (contrib[id] || 0) + actual;
-        log.push(`${me} paid ${money(actual)} · show`);
+        log.push(`${me} paid ${money(actual)} · Force Show 🎴`);
         phase = 'result';
         winner = null;
       } else if (t === 'mutual') {
@@ -192,6 +199,8 @@ export default function TeenPattiGame() {
           allIn,
           turn,
           stake,
+          lastBetAmt,
+          lastIsBlind,
           log,
           lastBy,
           winner,
@@ -357,6 +366,7 @@ export default function TeenPattiGame() {
         onTriggerDisconnect={engine.triggerGoDisconnect}
         onCheckTimeout={engine.checkGoTimeout}
         onOpenDebtModal={() => engine.setShowDebtModal(true)}
+        onKickPlayer={engine.removePlayer}
       />
 
       <main>
@@ -399,7 +409,7 @@ export default function TeenPattiGame() {
           />
           <div className="mut" style={{ textAlign: 'center', marginTop: 6 }} id="hint">
             {sessionMode === 'online'
-              ? 'Online Teen Patti · All players start Blind 🙈 · Click "See Cards" to flip your 3 cards!'
+              ? 'Online Teen Patti · All players start Blind · Click "See Cards" to flip your 3 cards!'
               : 'Playing in real life. Track boot, chaal, raises, stacks & who owes who.'}
           </div>
         </section>
@@ -412,6 +422,7 @@ export default function TeenPattiGame() {
           ante={gameState.ante}
           readyPlayers={gameState.readyPlayers}
           onToggleReady={engine.toggleReady}
+          onSitToggle={engine.toggleSit}
           onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
           onStartRound={engine.startRound}
           onAbortRound={engine.abortRound}
@@ -435,6 +446,15 @@ export default function TeenPattiGame() {
 
       <RoundHistory history={gameState.hist} />
 
+      {sessionMode === 'online' && engine.sessionId && (
+        <LiveChat
+          messages={gameState.chatMessages || []}
+          myPlayerId={myPlayer?.id || null}
+          isGameOperator={Boolean(gameState.isGameOperator)}
+          onSend={engine.sendChatMessage}
+        />
+      )}
+
       {/* Modals */}
       {engine.confirmModal && (
         <ConfirmModal
@@ -454,6 +474,7 @@ export default function TeenPattiGame() {
           debts={gameState.debts}
           myPlayerId={myPlayer?.id || null}
           isHost={isHost}
+          sessionMode={sessionMode}
           onClose={() => engine.setShowDebtModal(false)}
           onSettle={engine.settleDebt}
           onSettleAll={engine.settleAllDebts}

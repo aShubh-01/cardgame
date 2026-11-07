@@ -19,7 +19,10 @@ interface BlackjackControlsProps {
   isHost?: boolean;
   myPlayerId?: string | null;
   readyPlayers?: Record<string, boolean>;
-  onToggleReady?: () => void;
+  playerBets?: Record<string, number>;
+  onSetPlayerBet?: (betAmount: number, targetPlayerId?: string) => void;
+  onToggleReady?: (betAmount?: number) => void;
+  onSitToggle?: (id: string) => void;
   onOpenAddMoney?: (id: string) => void;
   onSetDealerPlayerId: (id: string | 'house') => void;
   onSetDealerRotation?: (rotation: boolean) => void;
@@ -49,7 +52,10 @@ export default function BlackjackControls({
   isHost = true,
   myPlayerId,
   readyPlayers = {},
+  playerBets = {},
+  onSetPlayerBet,
   onToggleReady,
+  onSitToggle,
   onOpenAddMoney,
   onSetDealerPlayerId,
   onSetDealerRotation,
@@ -64,13 +70,34 @@ export default function BlackjackControls({
 }: BlackjackControlsProps) {
   const isBalMode = !!balanceMode;
   const isOnline = sessionMode === 'online';
-  const seated = players.filter(p => !p.sit && !p.isGameOperator);
+  const seated = players.filter(p => !p.sit && !p.isGameOperator && (!isOnline || p.isConnected !== false));
   const effectiveNextDealer = nextDealerPlayerId || dealerPlayerId;
 
   const [dealerHasBj, setDealerHasBj] = useState<boolean>(false);
-  const [defaultBetStr, setDefaultBetStr] = useState<string>('100');
+  const [defaultBetStr, setDefaultBetStr] = useState<string>('50');
   const defaultBet = Math.max(0, Number(defaultBetStr) || 0);
   const [buyInStr, setBuyInStr] = useState<string>(String(defaultBuyIn));
+
+  const myPlayer = players.find(p => p.id === myPlayerId);
+  const myChosenWager = (myPlayerId && playerBets?.[myPlayerId]) || 50;
+  const [myWagerStr, setMyWagerStr] = useState<string>(String(myChosenWager));
+
+  useEffect(() => {
+    if (myPlayerId && playerBets?.[myPlayerId]) {
+      setMyWagerStr(String(playerBets[myPlayerId]));
+    }
+  }, [myPlayerId, playerBets]);
+
+  const handleUpdateWager = (amt: number) => {
+    let finalAmt = Math.max(1, Math.floor(amt));
+    if (isBalMode && myPlayer && typeof myPlayer.balance === 'number') {
+      finalAmt = Math.min(myPlayer.balance, finalAmt);
+    }
+    setMyWagerStr(String(finalAmt));
+    if (onSetPlayerBet && myPlayerId) {
+      onSetPlayerBet(finalAmt, myPlayerId);
+    }
+  };
 
   useEffect(() => {
     setBuyInStr(String(defaultBuyIn));
@@ -234,6 +261,9 @@ export default function BlackjackControls({
   const renderOnlineReadyAndRequests = () => {
     if (!isOnline) return null;
     const isMeNextDealer = Boolean(myPlayerId && effectiveNextDealer === myPlayerId);
+    const allTablePlayers = players.filter(p => !p.isGameOperator);
+    const mePlayer = players.find(p => p.id === myPlayerId);
+    const isMeSitting = Boolean(mePlayer?.sit);
 
     return (
       <div
@@ -254,10 +284,37 @@ export default function BlackjackControls({
           </span>
         </div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: myPlayerId ? 10 : 0 }}>
-          {seated.map(p => {
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          {allTablePlayers.map(p => {
+            const isDisconnected = p.isConnected === false;
+            const isSitting = Boolean(p.sit);
             const rdy = Boolean(readyPlayers[p.id]);
             const isDlr = p.id === effectiveNextDealer;
+
+            let statusLabel = '⏳ ';
+            let statusText = p.name;
+            let bg = 'rgba(255,255,255,0.06)';
+            let border = 'rgba(255,255,255,0.15)';
+            let color = 'var(--mut)';
+
+            if (isDisconnected) {
+              statusLabel = '🔌 ';
+              statusText = `${p.name} (Offline · Auto-skipped)`;
+              border = 'rgba(239, 68, 68, 0.45)';
+              color = '#fca5a5';
+            } else if (isSitting) {
+              statusLabel = '⏸ ';
+              statusText = `${p.name} (Skipping / Sitting)`;
+              border = 'rgba(251, 191, 36, 0.45)';
+              color = '#fde68a';
+            } else if (rdy) {
+              statusLabel = '👍 ';
+              statusText = `${p.name} (Ready)`;
+              bg = 'rgba(34, 197, 94, 0.18)';
+              border = 'rgba(74, 222, 128, 0.5)';
+              color = '#4ade80';
+            }
+
             return (
               <span
                 key={p.id}
@@ -266,41 +323,201 @@ export default function BlackjackControls({
                   padding: '4px 10px',
                   borderRadius: 999,
                   fontWeight: 800,
-                  background: rdy ? 'rgba(34, 197, 94, 0.18)' : 'rgba(255,255,255,0.06)',
-                  border: `1px solid ${rdy ? 'rgba(74, 222, 128, 0.5)' : 'rgba(255,255,255,0.15)'}`,
-                  color: rdy ? '#4ade80' : 'var(--mut)',
+                  background: bg,
+                  border: `1px solid ${border}`,
+                  color,
                 }}
               >
-                {rdy ? '👍 ' : '⏳ '}{p.name}{isDlr ? ' (🏦 Dealer)' : ''}
+                {statusLabel}{statusText}{isDlr ? ' (🏦 Dealer)' : ''}
               </span>
             );
           })}
         </div>
 
-        {myPlayerId && !isHost && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {onToggleReady && (
-                <button
-                  type="button"
-                  className={myReady ? 'good' : 'gold'}
-                  style={{ flex: 1, padding: '10px 12px', fontWeight: 900, fontSize: 13.5 }}
-                  onClick={onToggleReady}
-                >
-                  {myReady ? '👍 Ready! (Click to Unready)' : '👍 Ready for Next Hand'}
-                </button>
+        {/* Player Wagers Overview for Game Operator, Dealer or Spectator */}
+        {(isHost || isMeNextDealer || !myPlayerId) && (
+          <div
+            style={{
+              background: 'rgba(0, 0, 0, 0.35)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              borderRadius: 10,
+              padding: '8px 10px',
+              marginBottom: 10,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--gold)', textTransform: 'uppercase', marginBottom: 5 }}>
+              🪙 Player Wagers for Next Hand
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {players.filter(p => !p.sit && !p.isGameOperator && p.id !== effectiveNextDealer).map(p => {
+                const wager = playerBets?.[p.id] || 50;
+                return (
+                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                    <span style={{ color: 'var(--mut)' }}>{p.name}:</span>
+                    <span style={{ fontWeight: 800, color: '#38bdf8' }}>₹{wager}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Individual Player Wager Selector (Before Hand) */}
+        {myPlayerId && !isMeSitting && !isMeNextDealer && (
+          <div
+            style={{
+              background: 'rgba(15, 23, 42, 0.75)',
+              border: '1px solid rgba(244, 195, 79, 0.35)',
+              borderRadius: 12,
+              padding: '10px 12px',
+              marginBottom: 10,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 900, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                🪙 Your Wager for Next Hand
+              </span>
+              {isBalMode && myPlayer && typeof myPlayer.balance === 'number' && (
+                <span style={{ fontSize: 11, color: 'var(--mut)' }}>
+                  Stack: <b style={{ color: '#4ade80' }}>₹{myPlayer.balance}</b>
+                </span>
               )}
-              {!myReady && isBalMode && onOpenAddMoney && (
+            </div>
+
+            {/* Quick Casino Chips */}
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+              {[20, 50, 100, 250, 500].map(val => {
+                const isSelected = Number(myWagerStr) === val;
+                const canAfford = !isBalMode || !myPlayer || (myPlayer.balance ?? 0) >= val;
+                return (
+                  <button
+                    key={val}
+                    type="button"
+                    disabled={!canAfford}
+                    onClick={() => handleUpdateWager(val)}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: 999,
+                      fontSize: 11.5,
+                      fontWeight: 800,
+                      cursor: canAfford ? 'pointer' : 'not-allowed',
+                      opacity: canAfford ? 1 : 0.4,
+                      background: isSelected ? 'var(--gold)' : 'rgba(255,255,255,0.08)',
+                      color: isSelected ? '#0f172a' : '#fff',
+                      border: isSelected ? '1px solid #fbbf24' : '1px solid rgba(255,255,255,0.15)',
+                      boxShadow: isSelected ? '0 0 8px rgba(245, 158, 11, 0.4)' : 'none',
+                    }}
+                  >
+                    ₹{val}
+                  </button>
+                );
+              })}
+              {isBalMode && myPlayer && typeof myPlayer.balance === 'number' && myPlayer.balance > 0 && (
                 <button
                   type="button"
-                  className="sm"
-                  style={{ padding: '10px 12px', fontWeight: 800, fontSize: 12.5 }}
-                  onClick={() => onOpenAddMoney(myPlayerId)}
+                  onClick={() => handleUpdateWager(myPlayer.balance!)}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: 999,
+                    fontSize: 11.5,
+                    fontWeight: 800,
+                    background: Number(myWagerStr) === myPlayer.balance ? '#ef4444' : 'rgba(239, 68, 68, 0.2)',
+                    color: '#fff',
+                    border: '1px solid #ef4444',
+                  }}
                 >
-                  🪙 Request Chips
+                  Max (₹{myPlayer.balance})
                 </button>
               )}
             </div>
+
+            {/* Custom Bet Input */}
+            <div className="row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: 0 }}>
+              <span className="mut" style={{ fontSize: 12 }}>Custom Wager:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--gold)' }}>₹</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="50"
+                  value={myWagerStr}
+                  onChange={(e) => {
+                    const cleaned = e.target.value.replace(/[^0-9]/g, '');
+                    setMyWagerStr(cleaned);
+                    const num = Number(cleaned);
+                    if (num > 0) {
+                      handleUpdateWager(num);
+                    }
+                  }}
+                  style={{ width: 80, textAlign: 'center', fontSize: 14, fontWeight: 800, padding: '4px 6px' }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {myPlayerId && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {isMeSitting ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontSize: 12, color: '#fde68a', textAlign: 'center', background: 'rgba(251, 191, 36, 0.12)', padding: '6px 10px', borderRadius: 8 }}>
+                  ⏸ You are skipping the next hand (sitting out).
+                </div>
+                {onSitToggle && (
+                  <button
+                    type="button"
+                    className="pri"
+                    style={{ width: '100%', padding: '9px 12px', fontWeight: 900, fontSize: 13 }}
+                    onClick={() => onSitToggle(myPlayerId)}
+                  >
+                    ▶️ Rejoin Next Hand
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {onToggleReady && (
+                    <button
+                      type="button"
+                      className={myReady ? 'good' : 'gold'}
+                      style={{ flex: 1, padding: '10px 12px', fontWeight: 900, fontSize: 13.5 }}
+                      onClick={() => onToggleReady(!myReady ? Math.max(10, Number(myWagerStr) || 50) : undefined)}
+                    >
+                      {myReady ? '👍 Ready! (Click to Unready)' : '👍 Ready for Next Hand'}
+                    </button>
+                  )}
+                  {!myReady && isBalMode && onOpenAddMoney && (
+                    <button
+                      type="button"
+                      className="sm"
+                      style={{ padding: '10px 12px', fontWeight: 800, fontSize: 12.5 }}
+                      onClick={() => onOpenAddMoney(myPlayerId)}
+                    >
+                      🪙 Request Chips
+                    </button>
+                  )}
+                </div>
+                {onSitToggle && (
+                  <button
+                    type="button"
+                    className="sm mut"
+                    style={{
+                      width: '100%',
+                      padding: '7px 12px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '1px dashed rgba(255,255,255,0.2)',
+                      color: '#cbd5e1',
+                    }}
+                    onClick={() => onSitToggle(myPlayerId)}
+                  >
+                    ⏸ Skip Next Hand / Sit Out
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Between rounds, when NOT ready, player can request GO to make them the Dealer */}
             {isMeNextDealer ? (
@@ -508,18 +725,19 @@ export default function BlackjackControls({
           <h2>🏦 Table &amp; Dealer Setup</h2>
           {renderDealerAndRotationControls()}
 
-          <div className="row" style={{ margin: '10px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span className="mut">Default Bet:</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="100"
-              value={defaultBetStr}
-              disabled={isOnline && !isHost}
-              onChange={(e) => setDefaultBetStr(e.target.value.replace(/[^0-9]/g, ''))}
-              style={{ width: 95, textAlign: 'center', fontSize: 15, fontWeight: 800 }}
-            />
-          </div>
+          {(!isOnline || isHost) && (
+            <div className="row" style={{ margin: '10px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span className="mut">{isOnline ? 'Default / Fallback Bet:' : 'Default Bet:'}</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="50"
+                value={defaultBetStr}
+                onChange={(e) => setDefaultBetStr(e.target.value.replace(/[^0-9]/g, ''))}
+                style={{ width: 95, textAlign: 'center', fontSize: 15, fontWeight: 800 }}
+              />
+            </div>
+          )}
 
           <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px', fontSize: 11.5, margin: '12px 0' }}>
             <div>• <b>Win:</b> 1:1 payout · <b>Loss:</b> -1×</div>
@@ -552,10 +770,10 @@ export default function BlackjackControls({
   /* ───────── Case 2: Online Active Virtual Hand (Hit / Stand / Double) ───────── */
   if (isOnline && round.phase === 'hand') {
     const turnPlayer = players.find(p => p.id === round.turn);
-    const isMyTurn = myPlayerId === round.turn || (isHost && !myPlayerId);
+    const isMyTurn = isOnline ? Boolean(myPlayerId && round.turn === myPlayerId) : true;
     const myHand = myPlayerId && Array.isArray(round.hands?.[myPlayerId])
       ? (round.hands[myPlayerId] as any[])
-      : (turnPlayer && Array.isArray(round.hands?.[turnPlayer.id]) ? (round.hands[turnPlayer.id] as any[]) : []);
+      : [];
     const myEval = myHand.length > 0 ? evaluateBlackjackHand(myHand) : null;
 
     return (
@@ -582,16 +800,25 @@ export default function BlackjackControls({
             <div style={{ fontSize: 12, color: 'var(--mut)', marginBottom: 8 }}>
               {isMyTurn ? (
                 <b style={{ color: '#4ade80' }}>🎯 Your Turn to Act ({turnPlayer?.name})</b>
-              ) : (
+              ) : myPlayerId ? (
                 <span>⏳ Waiting for <b>{turnPlayer?.name}</b> to Hit or Stand...</span>
+              ) : (
+                <span style={{ color: 'var(--gold)', fontWeight: 800 }}>
+                  👁 Game Operator / Observer View · Turn: <b>{turnPlayer?.name}</b>
+                </span>
               )}
             </div>
 
             {myHand.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 8, margin: '10px 0' }}>
-                {myHand.map((c: any, idx: number) => (
-                  <PlayingCard key={idx} card={c} size="md" />
-                ))}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: 'var(--mut)', marginBottom: 4 }}>
+                  {isMyTurn ? 'Your Cards:' : 'Your Cards (Waiting):'}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 8, margin: '6px 0' }}>
+                  {myHand.map((c: any, idx: number) => (
+                    <PlayingCard key={idx} card={c} size="md" />
+                  ))}
+                </div>
               </div>
             )}
 

@@ -127,69 +127,92 @@ export default function SessionsModal({
   return (
     <div className="mdl" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="session-modal-box">
+        {/* Header */}
         <div className="session-modal-header">
-          <div>
-            <h2 style={{ margin: 0, fontSize: 20 }}>
-              {filter !== 'all' ? `${GAME_ICONS[filter]} ${GAME_NAMES[filter]} Sessions` : '🎲 Game Sessions'}
-            </h2>
-            <div className="mut" style={{ fontSize: 12, marginTop: 3 }}>
-              {filter !== 'all'
-                ? `Choose an existing ${GAME_NAMES[filter]} session to join, or create a new one.`
-                : 'Each session tracks players, bankrolls, rounds, and debts independently.'}
+          {isCreating ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button
+                type="button"
+                className="sm"
+                style={{ padding: '5px 12px', fontSize: 12, fontWeight: 700 }}
+                onClick={() => setIsCreating(false)}
+              >
+                ← Back
+              </button>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 20, color: 'var(--gold)' }}>
+                  ✨ Create New Session
+                </h2>
+                <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
+                  Set up game type, multiplayer room or IRL tracker, and bankroll mode.
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <h2 style={{ margin: 0, fontSize: 20 }}>
+                {filter !== 'all' ? `${GAME_ICONS[filter]} ${GAME_NAMES[filter]} Sessions` : '🎲 Game Sessions'}
+              </h2>
+              <div className="mut" style={{ fontSize: 12, marginTop: 3 }}>
+                {filter !== 'all'
+                  ? `Choose an existing ${GAME_NAMES[filter]} session to join, or create a new one.`
+                  : 'Each session tracks players, bankrolls, rounds, and debts independently.'}
+              </div>
+            </div>
+          )}
           <button className="sm" onClick={onClose}>✕ Close</button>
         </div>
 
-        {/* Filter tabs & New Session toggle */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
-          <div className="seg" style={{ margin: 0 }}>
-            <button className={filter === 'all' ? 'on' : ''} onClick={() => { setFilter('all'); setNewGame('pk'); }}>All</button>
-            <button className={filter === 'pk' ? 'on' : ''} onClick={() => { setFilter('pk'); setNewGame('pk'); }}>♠ Poker</button>
-            <button className={filter === 'tp' ? 'on' : ''} onClick={() => { setFilter('tp'); setNewGame('tp'); }}>♥ Teen Patti</button>
-            <button className={filter === 'rummy' ? 'on' : ''} onClick={() => { setFilter('rummy'); setNewGame('rummy'); }}>🎴 Rummy</button>
-            <button className={filter === 'bj' ? 'on' : ''} onClick={() => { setFilter('bj'); setNewGame('bj'); }}>♦ Blackjack</button>
+        {/* Filter tabs & New Session toggle (shown only when browsing sessions) */}
+        {!isCreating && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+            <div className="seg" style={{ margin: 0 }}>
+              <button className={filter === 'all' ? 'on' : ''} onClick={() => { setFilter('all'); setNewGame('pk'); }}>All</button>
+              <button className={filter === 'pk' ? 'on' : ''} onClick={() => { setFilter('pk'); setNewGame('pk'); }}>♠ Poker</button>
+              <button className={filter === 'tp' ? 'on' : ''} onClick={() => { setFilter('tp'); setNewGame('tp'); }}>♥ Teen Patti</button>
+              <button className={filter === 'rummy' ? 'on' : ''} onClick={() => { setFilter('rummy'); setNewGame('rummy'); }}>🎴 Rummy</button>
+              <button className={filter === 'bj' ? 'on' : ''} onClick={() => { setFilter('bj'); setNewGame('bj'); }}>♦ Blackjack</button>
+            </div>
+            <button
+              className="sm pri"
+              style={{ fontWeight: 800, padding: '6px 14px' }}
+              onClick={() => {
+                if (filter !== 'all') setNewGame(filter);
+                setIsCreating(true);
+              }}
+            >
+              + New Session
+            </button>
           </div>
-          <button
-            className="sm pri"
-            style={{ fontWeight: 800 }}
-            onClick={() => {
-              if (filter !== 'all') setNewGame(filter);
-              setIsCreating(prev => !prev);
-            }}
-          >
-            {isCreating ? 'Cancel' : '+ New Session'}
-          </button>
-        </div>
+        )}
 
         {/* New Session Creation Form */}
-        {isCreating && (
-          <div className="new-session-form">
-            <h3 style={{ margin: '0 0 10px', fontSize: 14, color: 'var(--gold)' }}>
-              Create New {filter !== 'all' ? GAME_NAMES[filter] : ''} Session
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {isCreating ? (
+          <div className="new-session-form" style={{ marginTop: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* Mode Selection */}
               <div>
-                <label style={{ fontSize: 11, opacity: 0.8, display: 'block', marginBottom: 4 }}>Session Mode</label>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 6 }}>
+                  Session Mode
+                </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
                   <div
                     onClick={() => setNewMode('tracker')}
                     style={{
                       cursor: 'pointer',
-                      padding: '10px 12px',
-                      borderRadius: 8,
+                      padding: '12px 14px',
+                      borderRadius: 10,
                       border: newMode === 'tracker' ? '1.5px solid var(--gold)' : '1px solid rgba(255,255,255,0.12)',
-                      background: newMode === 'tracker' ? 'rgba(244, 195, 79, 0.12)' : 'rgba(0,0,0,0.25)',
+                      background: newMode === 'tracker' ? 'rgba(244, 195, 79, 0.14)' : 'rgba(0,0,0,0.25)',
                       transition: 'all 0.15s ease',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, color: newMode === 'tracker' ? 'var(--gold)' : '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13.5, color: newMode === 'tracker' ? 'var(--gold)' : '#fff' }}>
                       <span>🎲</span>
                       <span>IRL Tracker Mode</span>
-                      {newMode === 'tracker' && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--gold)' }}>✓</span>}
+                      {newMode === 'tracker' && <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--gold)' }}>✓</span>}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--mut)', marginTop: 4, lineHeight: 1.35 }}>
+                    <div style={{ fontSize: 11, color: 'var(--mut)', marginTop: 5, lineHeight: 1.4 }}>
                       Playing with physical cards in real life. Admin manually records rounds, chip stacks, and settlements.
                     </div>
                   </div>
@@ -198,19 +221,19 @@ export default function SessionsModal({
                     onClick={() => setNewMode('online')}
                     style={{
                       cursor: 'pointer',
-                      padding: '10px 12px',
-                      borderRadius: 8,
+                      padding: '12px 14px',
+                      borderRadius: 10,
                       border: newMode === 'online' ? '1.5px solid #38bdf8' : '1px solid rgba(255,255,255,0.12)',
-                      background: newMode === 'online' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(0,0,0,0.25)',
+                      background: newMode === 'online' ? 'rgba(56, 189, 248, 0.16)' : 'rgba(0,0,0,0.25)',
                       transition: 'all 0.15s ease',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, color: newMode === 'online' ? '#38bdf8' : '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13.5, color: newMode === 'online' ? '#38bdf8' : '#fff' }}>
                       <span>🌐</span>
                       <span>Online Multiplayer</span>
-                      {newMode === 'online' && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#38bdf8' }}>✓</span>}
+                      {newMode === 'online' && <span style={{ marginLeft: 'auto', fontSize: 12, color: '#38bdf8' }}>✓</span>}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--mut)', marginTop: 4, lineHeight: 1.35 }}>
+                    <div style={{ fontSize: 11, color: 'var(--mut)', marginTop: 5, lineHeight: 1.4 }}>
                       Play online across devices with a shareable Room Code. Virtual cards, decentralized player inputs &amp; sync.
                     </div>
                   </div>
@@ -218,14 +241,16 @@ export default function SessionsModal({
               </div>
 
               <div>
-                <label style={{ fontSize: 11, opacity: 0.8, display: 'block', marginBottom: 3 }}>Session Name</label>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 5 }}>
+                  Session Name
+                </label>
                 <input
                   type="text"
                   placeholder={`e.g. Friday ${GAME_NAMES[newGame]} Night`}
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   maxLength={40}
-                  style={{ width: '100%', fontSize: 14, padding: '6px 10px' }}
+                  style={{ width: '100%', fontSize: 14, padding: '8px 12px', borderRadius: 8 }}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
                   autoFocus
                 />
@@ -233,7 +258,7 @@ export default function SessionsModal({
 
               {newMode === 'online' && (
                 <div>
-                  <label style={{ fontSize: 11, opacity: 0.8, display: 'block', marginBottom: 3 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 5 }}>
                     Your Display Name (Session Owner &amp; Default Game Operator)
                   </label>
                   <input
@@ -244,94 +269,121 @@ export default function SessionsModal({
                     maxLength={20}
                     style={{
                       width: '100%',
-                      fontSize: 13,
+                      fontSize: 13.5,
                       fontWeight: 600,
-                      padding: '6px 10px',
-                      borderRadius: 6,
-                      border: '1px solid rgba(56, 189, 248, 0.4)',
-                      background: 'rgba(15, 23, 42, 0.7)',
+                      padding: '8px 12px',
+                      borderRadius: 8,
+                      border: '1px solid rgba(56, 189, 248, 0.45)',
+                      background: 'rgba(15, 23, 42, 0.75)',
                       color: '#38bdf8',
                     }}
                   />
-                  <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
-                    You start as the Session Owner &amp; stealth Game Operator (hidden from players). You can transfer the Game Operator role to any player before/after a round if you want to play!
+                  <div className="mut" style={{ fontSize: 11, marginTop: 4, lineHeight: 1.35 }}>
+                    👑 You start as the Session Owner &amp; stealth Game Operator (hidden from players). You can transfer the Game Operator role to any player before/after a round if you want to play!
                   </div>
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: 140 }}>
-                  <label style={{ fontSize: 11, opacity: 0.8, display: 'block', marginBottom: 3 }}>Game</label>
-                  <div className="seg" style={{ margin: 0, width: '100%' }}>
-                    <button
-                      type="button"
-                      style={{ flex: 1 }}
-                      className={newGame === 'pk' ? 'on' : ''}
-                      onClick={() => setNewGame('pk')}
-                    >
-                      ♠ Poker
-                    </button>
-                    <button
-                      type="button"
-                      style={{ flex: 1 }}
-                      className={newGame === 'tp' ? 'on' : ''}
-                      onClick={() => setNewGame('tp')}
-                    >
-                      ♥ Teen Patti
-                    </button>
-                    <button
-                      type="button"
-                      style={{ flex: 1 }}
-                      className={newGame === 'rummy' ? 'on' : ''}
-                      onClick={() => setNewGame('rummy')}
-                    >
-                      🎴 Rummy
-                    </button>
-                    <button
-                      type="button"
-                      style={{ flex: 1 }}
-                      className={newGame === 'bj' ? 'on' : ''}
-                      onClick={() => setNewGame('bj')}
-                    >
-                      ♦ Blackjack
-                    </button>
-                  </div>
+              {/* Game Selection */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 6 }}>
+                  Select Game
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                  {(['pk', 'tp', 'rummy', 'bj'] as const).map((gKey) => {
+                    const isSelected = newGame === gKey;
+                    return (
+                      <button
+                        key={gKey}
+                        type="button"
+                        onClick={() => setNewGame(gKey)}
+                        style={{
+                          padding: '10px 8px',
+                          borderRadius: 8,
+                          border: isSelected ? '1.5px solid var(--gold)' : '1px solid rgba(255,255,255,0.12)',
+                          background: isSelected
+                            ? 'linear-gradient(135deg, rgba(244, 195, 79, 0.22), rgba(212, 175, 55, 0.1))'
+                            : 'rgba(0,0,0,0.25)',
+                          color: isSelected ? 'var(--gold)' : '#e2e8f0',
+                          fontWeight: isSelected ? 800 : 600,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 4,
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <span style={{ fontSize: 18 }}>{GAME_ICONS[gKey]}</span>
+                        <span>{GAME_NAMES[gKey]}</span>
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
 
-                <div style={{ flex: 1, minWidth: 160 }}>
-                  <label style={{ fontSize: 11, opacity: 0.8, display: 'block', marginBottom: 3 }}>Bankroll Mode (Locked to session)</label>
-                  <div className="seg" style={{ margin: 0, width: '100%' }}>
-                    <button
-                      type="button"
-                      style={{ flex: 1 }}
-                      className={!newBalMode ? 'on' : ''}
-                      onClick={() => setNewBalMode(false)}
-                    >
-                      📜 Debts
-                    </button>
-                    <button
-                      type="button"
-                      style={{ flex: 1 }}
-                      className={newBalMode ? 'on' : ''}
-                      onClick={() => setNewBalMode(true)}
-                    >
-                      🪙 Chips
-                    </button>
+              {/* Bankroll Mode Selection */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', marginBottom: 6 }}>
+                  Bankroll Mode (Locked to session)
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+                  <div
+                    onClick={() => setNewBalMode(false)}
+                    style={{
+                      cursor: 'pointer',
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      border: !newBalMode ? '1.5px solid var(--gold)' : '1px solid rgba(255,255,255,0.12)',
+                      background: !newBalMode ? 'rgba(244, 195, 79, 0.14)' : 'rgba(0,0,0,0.25)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, color: !newBalMode ? 'var(--gold)' : '#fff' }}>
+                      <span>📜</span>
+                      <span>Debts Mode</span>
+                      {!newBalMode && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--gold)' }}>✓</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--mut)', marginTop: 4, lineHeight: 1.35 }}>
+                      Players don&apos;t have fixed stacks. Net wins and losses are calculated and settled via the Debt matrix.
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => setNewBalMode(true)}
+                    style={{
+                      cursor: 'pointer',
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      border: newBalMode ? '1.5px solid #fbbf24' : '1px solid rgba(255,255,255,0.12)',
+                      background: newBalMode ? 'rgba(251, 191, 36, 0.14)' : 'rgba(0,0,0,0.25)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13, color: newBalMode ? '#fbbf24' : '#fff' }}>
+                      <span>🪙</span>
+                      <span>Chips Mode</span>
+                      {newBalMode && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#fbbf24' }}>✓</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--mut)', marginTop: 4, lineHeight: 1.35 }}>
+                      Fixed chip stack buy-in. Real casino chip stacks, All-ins &amp; rebuys tracked.
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {newBalMode ? (
-                <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(244,195,79,0.25)', borderRadius: 8, padding: '10px 12px' }}>
+              {newBalMode && (
+                <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(244,195,79,0.25)', borderRadius: 8, padding: '10px 14px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12 }}>Starting Buy-in per player (Min ₹10):</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 700 }}>Starting Buy-in per player (Min ₹10):</span>
                     <input
                       type="text"
                       inputMode="numeric"
                       placeholder="1000"
                       value={newBuyInStr}
                       onChange={(e) => setNewBuyInStr(e.target.value.replace(/[^0-9]/g, ''))}
-                      style={{ width: 100, textAlign: 'center', fontSize: 14 }}
+                      style={{ width: 110, textAlign: 'center', fontSize: 14, fontWeight: 700, padding: '4px 8px' }}
                     />
                   </div>
                   <div className="q" style={{ marginTop: 8 }}>
@@ -344,17 +396,16 @@ export default function SessionsModal({
                     Every player starts with this chip stack. All-ins and rebuys are tracked.
                   </div>
                 </div>
-              ) : (
-                <div className="mut" style={{ fontSize: 11, background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: 6 }}>
-                  📜 <b>Debt Mode:</b> Players don&apos;t have fixed stacks. Net wins and losses are calculated and settled via the Debt matrix.
-                </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-                <button className="sm" onClick={() => setIsCreating(false)}>Cancel</button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                <button type="button" className="sm" onClick={() => setIsCreating(false)}>
+                  Cancel
+                </button>
                 <button
+                  type="button"
                   className="sm pri"
-                  style={{ fontWeight: 800, padding: '6px 16px' }}
+                  style={{ fontWeight: 800, padding: '8px 22px', fontSize: 13 }}
                   disabled={!newName.trim() || !isBuyInValid || submitting}
                   onClick={handleCreate}
                 >
@@ -363,24 +414,22 @@ export default function SessionsModal({
               </div>
             </div>
           </div>
-        )}
-
-        {/* Sessions List or Empty State */}
-        <div className="session-cards-list">
-          {!filteredSessions.length ? (
-            <div style={{ textAlign: 'center', padding: '36px 20px', background: 'rgba(0,0,0,0.25)', borderRadius: 14, border: '1px dashed var(--line)', margin: '10px 0' }}>
-              <div style={{ fontSize: 36, marginBottom: 10 }}>
-                {filter !== 'all' ? GAME_ICONS[filter] : '🎲'}
-              </div>
-              <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--gold)' }}>
-                {filter !== 'all' ? `No ${GAME_NAMES[filter]} Sessions Available` : 'No Sessions Found'}
-              </h3>
-              <p className="mut" style={{ fontSize: 12.5, maxWidth: 360, margin: '0 auto 16px', lineHeight: 1.45 }}>
-                {filter !== 'all'
-                  ? `No sessions currently exist for ${GAME_NAMES[filter]}. Create a session below to set buy-ins and start recording your physical card game.`
-                  : 'No game sessions exist yet. Create one to begin tracking stacks, pots, and debts.'}
-              </p>
-              {!isCreating && (
+        ) : (
+          /* Sessions List or Empty State (rendered only when NOT creating) */
+          <div className="session-cards-list">
+            {!filteredSessions.length ? (
+              <div style={{ textAlign: 'center', padding: '36px 20px', background: 'rgba(0,0,0,0.25)', borderRadius: 14, border: '1px dashed var(--line)', margin: '10px 0' }}>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>
+                  {filter !== 'all' ? GAME_ICONS[filter] : '🎲'}
+                </div>
+                <h3 style={{ margin: '0 0 6px', fontSize: 16, color: 'var(--gold)' }}>
+                  {filter !== 'all' ? `No ${GAME_NAMES[filter]} Sessions Available` : 'No Sessions Found'}
+                </h3>
+                <p className="mut" style={{ fontSize: 12.5, maxWidth: 360, margin: '0 auto 16px', lineHeight: 1.45 }}>
+                  {filter !== 'all'
+                    ? `No sessions currently exist for ${GAME_NAMES[filter]}. Create a session above to set buy-ins and start recording your physical card game.`
+                    : 'No game sessions exist yet. Create one to begin tracking stacks, pots, and debts.'}
+                </p>
                 <button
                   type="button"
                   className="pri big"
@@ -392,9 +441,8 @@ export default function SessionsModal({
                 >
                   + Create {filter !== 'all' ? GAME_NAMES[filter] : ''} Session
                 </button>
-              )}
-            </div>
-          ) : (
+              </div>
+            ) : (
             filteredSessions.map(sess => {
               const isCurrent = sess._id === currentSessionId;
               const isEnded = sess.status === 'archived';
@@ -467,6 +515,7 @@ export default function SessionsModal({
             })
           )}
         </div>
+        )}
       </div>
     </div>
   );

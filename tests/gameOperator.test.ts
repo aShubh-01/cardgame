@@ -73,10 +73,9 @@ test('Three-Role System: Game Operator is hidden from players and sees all unmas
   const goView = sanitizeStateForClient(rawState, 'owner@test.com');
   assert.equal(goView.myRole, 'owner_go');
   assert.equal(goView.isGameOperator, true);
-  // GO sees both Alice's and Bob's unmasked hole cards
-  assert.ok(Array.isArray(goView.round.hands.p1));
-  assert.ok(Array.isArray(goView.round.hands.p2));
-  assert.equal(goView.round.hands.p2[0].rank, 'Q');
+  // Hole cards are masked for GO/Admin as well (card secrecy enforced)
+  assert.equal(goView.round.hands.p1.masked, true);
+  assert.equal(goView.round.hands.p2.masked, true);
   // GO sees full activityLog
   assert.equal(goView.activityLog.length, 1);
 });
@@ -101,7 +100,14 @@ test('Role Transfer & 15s Disconnect Volunteer / Auto-Queue Flow', () => {
     activityLog: [],
   };
 
-  // Detect GO disconnect during active round -> opens 15s volunteer window
+  // 1. If GO disconnected only 30s ago (< 1 minute), no alert is shown
+  sessionDoc.goLastHeartbeat = Date.now() - 30_000;
+  const mutatedGrace = syncGameOperatorPresence(sessionDoc, 'alice@test.com');
+  assert.ok(!sessionDoc.goDisconnectEvent, 'No alert within 1 minute grace period');
+
+  // 2. If GO is disconnected for > 1 minute (e.g. 65s), trigger 15s volunteer alert
+  sessionDoc.goLastHeartbeat = Date.now() - 65_000;
+  sessionDoc.goDisconnectedAt = Date.now() - 65_000;
   const mutated1 = syncGameOperatorPresence(sessionDoc, 'alice@test.com');
   assert.equal(mutated1, true);
   assert.equal(sessionDoc.goDisconnectEvent.status, 'volunteering');
@@ -162,3 +168,46 @@ test('Blackjack Who Owes Who (debtsDelta) works in both Balance Mode and Tracker
   });
   assert.equal(resHouseDealer.debtsDelta['house|p2'], 150);
 });
+
+test('Connection Status: isPlayerConnected detects 10s heartbeat timeout and disconnect signals', async () => {
+  const { isPlayerConnected } = await import('../lib/gameOperator.ts');
+
+  const now = 100_000;
+  // 1. Fresh heartbeat (seen 2s ago)
+  const connectedPlayer = { id: 'p1', lastSeenAt: now - 2000, isConnected: true };
+  assert.equal(isPlayerConnected(connectedPlayer, now), true);
+
+  // 2. Timed out heartbeat (seen 12s ago > 10s timeout)
+  const timedOutPlayer = { id: 'p2', lastSeenAt: now - 12000, isConnected: true };
+  assert.equal(isPlayerConnected(timedOutPlayer, now), false);
+
+  // 3. Explicitly disconnected signal
+  const disconnectedPlayer = { id: 'p3', lastSeenAt: now - 1000, isConnected: false };
+  assert.equal(isPlayerConnected(disconnectedPlayer, now), false);
+});
+
+test('Short-Stack All-In & Side Pots in Teen Patti and Poker', async () => {
+  const { calculatePots } = await import('../lib/pokerPot.ts');
+
+  // Player 1 has stack 80 (went all in), Player 2 bet 400, Player 3 bet 400
+  const contrib = { p1: 80, p2: 400, p3: 400 };
+  const folded = { p1: false, p2: false, p3: false };
+
+  const { pots, totalPot } = calculatePots(contrib, folded);
+
+  // When NO ONE is all-in, NO side pots are created (only Main Pot)
+  const noAllInPots = calculatePots({ A: 25, B: 5 }, {}, {});
+  assert.equal(noAllInPots.pots.length, 1);
+  assert.equal(noAllInPots.pots[0].name, 'Main Pot');
+  assert.equal(noAllInPots.pots[0].amount, 30);
+  assert.deepEqual(noAllInPots.pots[0].eligiblePlayerIds.sort(), ['A', 'B'].sort());
+
+  // When p1 goes ALL-IN with 80, Side Pot is created for remaining 320 between p2 & p3
+  const allInPots = calculatePots(contrib, folded, { p1: true });
+  assert.equal(allInPots.pots.length, 2);
+  assert.equal(allInPots.pots[0].amount, 240);
+  assert.deepEqual(allInPots.pots[0].eligiblePlayerIds.sort(), ['p1', 'p2', 'p3'].sort());
+  assert.equal(allInPots.pots[1].amount, 640);
+  assert.deepEqual(allInPots.pots[1].eligiblePlayerIds.sort(), ['p2', 'p3'].sort());
+});
+

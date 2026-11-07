@@ -35,7 +35,7 @@ export default function PokerTable({
   const [spinSteps, setSpinSteps] = useState(0);
 
   const { pots, totalPot } = round
-    ? calculatePots(round.contrib || {}, round.folded || {})
+    ? calculatePots(round.contrib || {}, round.folded || {}, round.allIn || {})
     : { pots: [], totalPot: 0 };
 
   const activePlayers = round
@@ -181,10 +181,13 @@ export default function PokerTable({
         const pkPickable = !isOnline && round && round.phase === 'result' && inR && !f;
         const isBusted = isBalMode && (pl.balance || 0) <= 0;
         const isSpectator = round && !inR && !pl.sit && !isBusted;
+        const isDisconnected = isOnline && pl.isConnected === false;
 
         let sa = '';
         if (round) {
-          if (isSpectator) {
+          if (isDisconnected) {
+            sa = '🔌 Offline';
+          } else if (isSpectator) {
             sa = '⏳ Next hand';
           } else if (!inR) {
             sa = isBusted ? 'Busted · Paused' : 'Sat out';
@@ -196,7 +199,7 @@ export default function PokerTable({
             sa = money(round.contrib[pl.id] || 0);
           }
         } else {
-          sa = isBusted ? '💥 Busted (₹0) · Paused' : pl.sit ? 'Sitting out' : 'Ready';
+          sa = isDisconnected ? '🔌 Disconnected' : isBusted ? '💥 Busted (₹0) · Paused' : pl.sit ? 'Sitting out' : 'Ready';
         }
 
         const col = COL[i % COL.length];
@@ -212,7 +215,7 @@ export default function PokerTable({
         return (
           <div
             key={pl.id}
-            className={`seat ${turn ? 'turn' : ''} ${isSpectator ? 'spectating' : ''} ${f || (round && !inR && !isSpectator) || (!round && pl.sit) || (isBusted && !inR) ? 'fold' : ''} ${isAllIn ? 'allin' : ''} ${isBusted && !inR ? 'busted' : ''} ${win ? 'win' : ''} ${pkPickable ? 'pick' : ''}`}
+            className={`seat ${turn ? 'turn' : ''} ${isSpectator ? 'spectating' : ''} ${f || (round && !inR && !isSpectator) || (!round && pl.sit) || (isBusted && !inR) ? 'fold' : ''} ${isAllIn ? 'allin' : ''} ${isBusted && !inR ? 'busted' : ''} ${isDisconnected ? 'offline' : ''} ${win ? 'win' : ''} ${pkPickable ? 'pick' : ''}`}
             data-seat={pl.id}
             style={{
               left: `calc(50% + (50% - var(--sx)) * ${x})`,
@@ -222,6 +225,11 @@ export default function PokerTable({
               if (pkPickable && onPickWinner) onPickWinner(pl.id);
             }}
           >
+            {isDisconnected && (
+              <div className="tg" style={{ background: '#4b5563', color: '#fff', borderColor: '#9ca3af' }}>
+                🔌 OFFLINE
+              </div>
+            )}
             {round?.dealer === pl.id && (
               <span
                 style={{
@@ -291,8 +299,34 @@ export default function PokerTable({
             <div className={`sa ${isBusted && !isAllIn ? 'neg' : ''}`}>{sa}</div>
 
             {/* Virtual Hole Cards */}
-            {handData && inR && !f && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 4, gap: 2 }}>
+            {handData && inR && (!f || pl.id === myPlayerId) && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  marginTop: 4,
+                  gap: 2,
+                  opacity: f ? 0.65 : 1,
+                  filter: f ? 'grayscale(40%)' : 'none',
+                }}
+              >
+                {f && (
+                  <span
+                    style={{
+                      fontSize: 8.5,
+                      fontWeight: 800,
+                      color: '#f87171',
+                      background: 'rgba(239, 68, 68, 0.22)',
+                      border: '1px solid rgba(239, 68, 68, 0.4)',
+                      padding: '1px 6px',
+                      borderRadius: 4,
+                      letterSpacing: 0.5,
+                    }}
+                  >
+                    FOLDED
+                  </span>
+                )}
                 <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                   {isVisibleHand ? (
                     handData.map((c: any, ci: number) => (

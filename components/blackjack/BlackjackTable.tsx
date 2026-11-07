@@ -14,6 +14,7 @@ interface BlackjackTableProps {
   myPlayerId?: string | null;
   sessionMode?: 'tracker' | 'online';
   isHost?: boolean;
+  playerBets?: Record<string, number>;
   onOpenAddMoney: (id: string) => void;
 }
 
@@ -25,6 +26,7 @@ export default function BlackjackTable({
   myPlayerId,
   sessionMode = 'tracker',
   isHost = true,
+  playerBets = {},
   onOpenAddMoney,
 }: BlackjackTableProps) {
   const isBalMode = !!balanceMode;
@@ -185,6 +187,7 @@ export default function BlackjackTable({
         const isTurn = round && round.phase === 'hand' && round.turn === pl.id;
         const isBusted = isBalMode && (pl.balance || 0) <= 0;
         const isSpectator = round && !inR && !pl.sit && !isBusted;
+        const isDisconnected = isOnline && pl.isConnected === false;
         const col = COL[players.findIndex(p => p.id === pl.id) % COL.length];
         const isRoundActive = Boolean(round && !round.settled && round.phase !== 'result');
         const canModifyChips = !isRoundActive && (!isOnline || isHost || pl.id === myPlayerId);
@@ -197,14 +200,19 @@ export default function BlackjackTable({
         return (
           <div
             key={pl.id}
-            className={`seat ${isTurn ? 'turn' : ''} ${isSpectator ? 'spectating' : ''} ${!inR && round && !isSpectator ? 'fold' : ''} ${isBusted && !inR ? 'busted' : ''}`}
+            className={`seat ${isTurn ? 'turn' : ''} ${isSpectator ? 'spectating' : ''} ${!inR && round && !isSpectator ? 'fold' : ''} ${isBusted && !inR ? 'busted' : ''} ${isDisconnected ? 'offline' : ''}`}
             data-seat={pl.id}
             style={{
               left: `calc(50% + (50% - var(--sx)) * ${x})`,
               top: `calc(52% + (48% - var(--sy)) * ${y})`,
             }}
           >
-            {isTurn && <div className="tg">▼ YOUR TURN</div>}
+            {isDisconnected && (
+              <div className="tg" style={{ background: '#4b5563', color: '#fff', borderColor: '#9ca3af' }}>
+                🔌 OFFLINE
+              </div>
+            )}
+            {isTurn && !isDisconnected && <div className="tg">▼ YOUR TURN</div>}
             {isSpectator && (
               <div className="tg" style={{ background: 'rgba(56, 189, 248, 0.9)', color: '#0f172a', borderColor: '#38bdf8', fontWeight: 800 }}>
                 ⏳ SPECTATING
@@ -235,7 +243,9 @@ export default function BlackjackTable({
             </div>
             <div className="sn">{pl.name}</div>
             <div className="sa" style={{ fontSize: 11, color: 'var(--mut)' }}>
-              {round
+              {isDisconnected
+                ? '🔌 Offline'
+                : round
                 ? inR
                   ? round.contrib?.[pl.id]
                     ? `Bet: ${money(round.contrib[pl.id])}`
@@ -243,6 +253,8 @@ export default function BlackjackTable({
                   : 'Sitting out'
                 : pl.sit
                 ? 'Sitting out'
+                : playerBets?.[pl.id]
+                ? `Wager: ${money(playerBets[pl.id])}`
                 : 'Betting Box'}
             </div>
 

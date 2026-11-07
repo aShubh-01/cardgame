@@ -57,6 +57,7 @@ export default function SeatsList({
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string>('');
+  const [confirmKickId, setConfirmKickId] = useState<string | null>(null);
 
   const isBalMode = !!balanceMode;
   const isOnline = sessionMode === 'online';
@@ -204,18 +205,28 @@ export default function SeatsList({
               const canOpenChips = !isRoundActive && isBalMode && (!isOnline || isHost || p.id === myPlayerId);
               const myPendingReq = pendingRequests.find(r => r.playerId === p.id);
               const isPlayerReady = Boolean(readyPlayers?.[p.id]);
+              const isDisconnected = isOnline && p.isConnected === false;
 
               return (
                 <div
                   key={p.id}
-                  className={`pr ${draggedId === p.id ? 'dragging' : ''}`}
+                  className={`pr ${draggedId === p.id ? 'dragging' : ''} ${isDisconnected ? 'pr-offline' : ''}`}
                   draggable={isHost && !round}
                   onDragStart={() => handleDragStart(p.id)}
                   onDragOver={(e) => handleDragOver(e, p.id)}
                   onDragEnd={handleDragEnd}
+                  title={isDisconnected ? `${p.name} is disconnected · will be skipped next round until they reconnect` : undefined}
                 >
                   {isHost && !round && <span className="hd" title="Drag to reorder seat">⠿</span>}
-                  {avFn(p.id)}
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    {avFn(p.id)}
+                    {isOnline && (
+                      <span
+                        className={`presence-dot ${isDisconnected ? 'off' : 'on'}`}
+                        title={isDisconnected ? 'Disconnected' : 'Online'}
+                      />
+                    )}
+                  </div>
                   <div className="pr-main">
                     {editingId === p.id ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -276,7 +287,22 @@ export default function SeatsList({
                             YOU
                           </span>
                         )}
-                        {isOnline && !isRoundActive && !p.sit && (
+                        {isDisconnected && (
+                          <span
+                            style={{
+                              fontSize: 9.5,
+                              background: 'rgba(239, 68, 68, 0.16)',
+                              color: '#fca5a5',
+                              border: '1px solid rgba(239, 68, 68, 0.45)',
+                              fontWeight: 800,
+                              padding: '1px 6px',
+                              borderRadius: 999,
+                            }}
+                          >
+                            🔌 Offline
+                          </span>
+                        )}
+                        {isOnline && !isRoundActive && !p.sit && !isDisconnected && (
                           <span
                             style={{
                               fontSize: 9.5,
@@ -351,18 +377,49 @@ export default function SeatsList({
                       <>
                         <button
                           className="ib sm"
-                          title={isBusted ? 'Busted (Add money to unpause)' : 'Sit out / in'}
+                          title={p.sit ? 'Seat player in' : 'Sit player out'}
                           onClick={() => onSitToggle(p.id)}
                         >
                           {p.sit ? '▶' : '⏸'}
                         </button>
-                        <button
-                          className="ib sm bad"
-                          title="Remove"
-                          onClick={() => onRemovePlayer(p.id)}
-                        >
-                          ✕
-                        </button>
+                        {confirmKickId === p.id ? (
+                          <button
+                            type="button"
+                            className="kick-btn sm"
+                            style={{
+                              padding: '4px 9px',
+                              fontSize: 11,
+                              background: '#b91c1c',
+                              color: '#fff',
+                              borderColor: '#fca5a5',
+                              whiteSpace: 'nowrap',
+                              animation: 'pulse 1s infinite alternate',
+                            }}
+                            title={`Confirm kick ${p.name} from room`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRemovePlayer(p.id);
+                              setConfirmKickId(null);
+                            }}
+                          >
+                            ⚠️ Kick?
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="kick-btn ib sm"
+                            title={`Kick ${p.name} from session`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmKickId(p.id);
+                              setTimeout(() => {
+                                setConfirmKickId(curr => (curr === p.id ? null : curr));
+                              }, 4000);
+                            }}
+                          >
+                            👢
+                          </button>
+                        )}
                       </>
                     )}
                   </div>
@@ -440,7 +497,7 @@ export default function SeatsList({
         )}
 
         <button style={{ width: '100%', marginTop: 8 }} onClick={onOpenDebtModal}>
-          💸 You owe &amp; Who owes you
+          💸 {isOnline ? 'You owe & Who owes you' : 'Who Owes Who'}
         </button>
       </div>
 

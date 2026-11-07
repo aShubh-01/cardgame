@@ -34,18 +34,51 @@ export async function GET(
       if (!isHost && !isSeated) {
         return NextResponse.json({ error: 'You are not seated in this online room.' }, { status: 403 });
       }
+      const PRESENCE_KEYS = ['isConnected', 'isOnline', 'lastSeenAt'];
+      const stripPresence = (list: any[]) =>
+        JSON.stringify(
+          (list || []).map((p: any) => {
+            const c = { ...p };
+            PRESENCE_KEYS.forEach(k => delete c[k]);
+            return c;
+          })
+        );
+      const beforePlayers = JSON.parse(JSON.stringify(sessionDoc.players || []));
+      const beforeNonPresence = stripPresence(beforePlayers);
+
       if (syncGameOperatorPresence(sessionDoc, userId)) {
-        await Session.findByIdAndUpdate(params.id, {
-          $set: {
-            gameOperatorUserId: sessionDoc.gameOperatorUserId,
-            nextGameOperatorUserId: sessionDoc.nextGameOperatorUserId,
-            goLastHeartbeat: sessionDoc.goLastHeartbeat,
-            goDisconnectEvent: sessionDoc.goDisconnectEvent,
-            players: sessionDoc.players,
-            readyPlayers: sessionDoc.readyPlayers,
-            activityLog: sessionDoc.activityLog,
-          },
-        });
+        const $set: Record<string, any> = {
+          gameOperatorUserId: sessionDoc.gameOperatorUserId,
+          nextGameOperatorUserId: sessionDoc.nextGameOperatorUserId,
+          goLastHeartbeat: sessionDoc.goLastHeartbeat,
+          goDisconnectEvent: sessionDoc.goDisconnectEvent,
+          readyPlayers: sessionDoc.readyPlayers,
+          activityLog: sessionDoc.activityLog,
+        };
+        const arrayFilters: any[] = [];
+
+        if (stripPresence(sessionDoc.players) !== beforeNonPresence) {
+          // Structural player changes (e.g. GO flag sync) → write full array
+          $set.players = sessionDoc.players;
+        } else {
+          // Presence-only changes → targeted per-player field updates (no clobbering)
+          (sessionDoc.players || []).forEach((p: any, idx: number) => {
+            const prev = beforePlayers.find((b: any) => b.id === p.id) || {};
+            const changed = PRESENCE_KEYS.some(k => prev[k] !== p[k]);
+            if (!changed) return;
+            const tag = `pl${idx}`;
+            PRESENCE_KEYS.forEach(k => {
+              if (p[k] !== undefined) $set[`players.$[${tag}].${k}`] = p[k];
+            });
+            arrayFilters.push({ [`${tag}.id`]: p.id });
+          });
+        }
+
+        await Session.updateOne(
+          { _id: params.id },
+          { $set },
+          arrayFilters.length ? { arrayFilters } : {}
+        );
       }
       return NextResponse.json(sanitizeStateForClient(sessionDoc, userId));
     }

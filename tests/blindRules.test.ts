@@ -95,19 +95,54 @@ test('Teen Patti Blind vs Seen Bet Rules', () => {
   // Blind player
   const blindBets = getTeenPattiBetAmounts(baseStake, true);
   assert.strictEqual(blindBets.chaalCost, 20); // 1x
-  assert.strictEqual(blindBets.minRaise, 40); // 2x
+  assert.strictEqual(blindBets.minRaise, 21); // chaalCost + 1
   assert.strictEqual(blindBets.showCost, 20); // 1x
 
   // Seen player vs Seen player
   const seenBetsVsSeen = getTeenPattiBetAmounts(baseStake, false, false);
   assert.strictEqual(seenBetsVsSeen.chaalCost, 40); // 2x
-  assert.strictEqual(seenBetsVsSeen.minRaise, 80); // 4x
+  assert.strictEqual(seenBetsVsSeen.minRaise, 41); // chaalCost + 1
   assert.strictEqual(seenBetsVsSeen.showCost, 40); // 2x
+
+  // Initial pot of 5 per player (baseStake = 5)
+  const blind5 = getTeenPattiBetAmounts(5, true);
+  assert.strictEqual(blind5.chaalCost, 5, 'Blind chaal must be 5 when ante is 5');
+  assert.strictEqual(blind5.minRaise, 6, 'Blind min raise must be 6');
+
+  const seen5 = getTeenPattiBetAmounts(5, false);
+  assert.strictEqual(seen5.chaalCost, 10, 'Seen chaal must be 10 (2x blind) when ante is 5');
+  assert.strictEqual(seen5.minRaise, 11, 'Seen min raise must be 11');
 
   // Seen player vs Blind player
   const seenBetsVsBlind = getTeenPattiBetAmounts(baseStake, false, true);
   assert.strictEqual(seenBetsVsBlind.chaalCost, 40); // 2x
-  assert.strictEqual(seenBetsVsBlind.showCost, 80); // 4x
+  assert.strictEqual(seenBetsVsBlind.showCost, 40); // falls back to chaalCost when pot not provided
+
+  // When pot is provided, showCost is the total current pot
+  const seenBetsVsBlindWithPot = getTeenPattiBetAmounts(baseStake, false, true, null, 120);
+  assert.strictEqual(seenBetsVsBlindWithPot.showCost, 120);
+
+  // Odd Seen Bet: Previous bet was 15 by Seen player
+  // Next Seen player should match 15 exactly (chaalCost = 15, minRaise = 16)
+  const seenAfterSeen15 = getTeenPattiBetAmounts(baseStake, false, false, { amount: 15, isBlind: false });
+  assert.strictEqual(seenAfterSeen15.chaalCost, 15);
+  assert.strictEqual(seenAfterSeen15.minRaise, 16);
+
+  // Next Blind player should bet floor(15 / 2) = 7 (chaalCost = 7, minRaise = 8)
+  const blindAfterSeen15 = getTeenPattiBetAmounts(baseStake, true, false, { amount: 15, isBlind: false });
+  assert.strictEqual(blindAfterSeen15.chaalCost, 7);
+  assert.strictEqual(blindAfterSeen15.minRaise, 8);
+
+  // Previous bet was 10 by Blind player
+  // Next Blind player calls with 10
+  const blindAfterBlind10 = getTeenPattiBetAmounts(baseStake, true, false, { amount: 10, isBlind: true });
+  assert.strictEqual(blindAfterBlind10.chaalCost, 10);
+  assert.strictEqual(blindAfterBlind10.minRaise, 11);
+
+  // Next Seen player calls with 20
+  const seenAfterBlind10 = getTeenPattiBetAmounts(baseStake, false, false, { amount: 10, isBlind: true });
+  assert.strictEqual(seenAfterBlind10.chaalCost, 20);
+  assert.strictEqual(seenAfterBlind10.minRaise, 21);
 });
 
 test('Teen Patti New Base Stake on Raise', () => {
@@ -120,4 +155,44 @@ test('Teen Patti New Base Stake on Raise', () => {
   // Seen player raises to 150 -> new base unit is 75
   assert.strictEqual(calcTeenPattiNewBaseStake(150, false), 75);
 });
+
+test('Teen Patti IRL Initial Pot of 5: Min chaal is 5 for blind, 10 for seen', () => {
+  const anteBoot = 5;
+  const baseStake = anteBoot; // 5
+
+  // 1. Initial turn (no prior bets):
+  // Blind player acts
+  const initialBlind = getTeenPattiBetAmounts(baseStake, true, false, null);
+  assert.strictEqual(initialBlind.chaalCost, 5, 'Blind player initial chaal must be 5');
+  assert.strictEqual(initialBlind.minRaise, 6, 'Blind player min raise must be 6');
+
+  // Seen player acts (flipped cards)
+  const initialSeen = getTeenPattiBetAmounts(baseStake, false, false, null);
+  assert.strictEqual(initialSeen.chaalCost, 10, 'Seen player initial chaal must be 10 (2x blind)');
+  assert.strictEqual(initialSeen.minRaise, 11, 'Seen player min raise must be 11');
+
+  // 2. Player A (Seen) plays 10
+  const afterSeen10Blind = getTeenPattiBetAmounts(baseStake, true, false, { amount: 10, isBlind: false });
+  assert.strictEqual(afterSeen10Blind.chaalCost, 5, 'Next blind player calls with floor(10/2) = 5');
+  assert.strictEqual(afterSeen10Blind.minRaise, 6);
+
+  const afterSeen10Seen = getTeenPattiBetAmounts(baseStake, false, false, { amount: 10, isBlind: false });
+  assert.strictEqual(afterSeen10Seen.chaalCost, 10, 'Next seen player calls with 10');
+  assert.strictEqual(afterSeen10Seen.minRaise, 11);
+
+  // 3. Player B (Seen) raises to 20
+  const afterSeen20Blind = getTeenPattiBetAmounts(baseStake, true, false, { amount: 20, isBlind: false });
+  assert.strictEqual(afterSeen20Blind.chaalCost, 10, 'Next blind player calls with floor(20/2) = 10');
+  assert.strictEqual(afterSeen20Blind.minRaise, 11);
+
+  const afterSeen20Seen = getTeenPattiBetAmounts(baseStake, false, false, { amount: 20, isBlind: false });
+  assert.strictEqual(afterSeen20Seen.chaalCost, 20, 'Next seen player calls with 20');
+  assert.strictEqual(afterSeen20Seen.minRaise, 21);
+
+  // 4. Force Show: Must cost total current pot
+  const pot50 = 50;
+  const showWithPot = getTeenPattiBetAmounts(baseStake, false, false, { amount: 20, isBlind: false }, pot50);
+  assert.strictEqual(showWithPot.showCost, 50, 'Force show must cost total current pot (50)');
+});
+
 

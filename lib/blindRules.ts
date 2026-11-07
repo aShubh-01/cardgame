@@ -157,31 +157,52 @@ export function postPokerBlinds({
   };
 }
 
+export interface LastBetInfo {
+  amount: number;
+  isBlind: boolean;
+}
+
 /**
  * Teen Patti Blind and Seen Betting Rules:
  * - baseStake: The current blind stake unit B (defaults to ante amount).
- * - A Blind player bets 1x B.
- * - A Seen player bets 2x B.
- * - A Blind raise must be at least 2x B (setting new baseStake = raiseAmount).
- * - A Seen raise must be at least 4x B (setting new baseStake = floor(raiseAmount / 2)).
+ * - A Blind player bets 1x B (or matches previous blind bet / half of previous seen bet).
+ * - A Seen player bets 2x B (or matches previous seen bet / double of previous blind bet).
+ * - A raise must be at least chaalCost + 1.
  * - Show cost (2 players remain):
- *   - Blind turn: 1x B
- *   - Seen turn vs Seen: 2x B
- *   - Seen turn vs Blind: 4x B
+ *   - Blind turn: chaalCost
+ *   - Seen turn vs Seen: chaalCost
+ *   - Seen turn vs Blind: 2 * chaalCost
  */
 export function getTeenPattiBetAmounts(
   baseStake: number,
   isBlind: boolean,
-  isOtherBlind: boolean = false
+  isOtherBlind: boolean = false,
+  lastBet?: LastBetInfo | null,
+  currentPot?: number
 ) {
   const B = Math.max(1, baseStake);
-  const chaalCost = isBlind ? B : 2 * B;
-  const minRaise = isBlind ? 2 * B : 4 * B;
+  let chaalCost: number;
 
-  let showCost = B;
-  if (!isBlind) {
-    showCost = isOtherBlind ? 4 * B : 2 * B;
+  if (lastBet && typeof lastBet.amount === 'number' && lastBet.amount > 0) {
+    if (lastBet.isBlind) {
+      // Previous bet was Blind (amount L):
+      // Next Blind player calls with L.
+      // Next Seen player calls with 2 * L.
+      chaalCost = isBlind ? lastBet.amount : 2 * lastBet.amount;
+    } else {
+      // Previous bet was Seen (amount L):
+      // Next Seen player calls with L (e.g. 15 -> 15).
+      // Next Blind player calls with floor(L / 2) (e.g. 15 -> 7).
+      chaalCost = isBlind ? Math.max(1, Math.floor(lastBet.amount / 2)) : lastBet.amount;
+    }
+  } else {
+    chaalCost = isBlind ? B : 2 * B;
   }
+
+  const minRaise = chaalCost + 1;
+
+  // Force show costs the total current pot (or chaalCost if pot is empty)
+  const showCost = typeof currentPot === 'number' && currentPot > 0 ? currentPot : chaalCost;
 
   return {
     baseStake: B,
@@ -198,5 +219,5 @@ export function calcTeenPattiNewBaseStake(raiseAmt: number, isBlind: boolean): n
   if (isBlind) {
     return Math.max(1, raiseAmt);
   }
-  return Math.max(1, Math.ceil(raiseAmt / 2));
+  return Math.max(1, Math.floor(raiseAmt / 2));
 }

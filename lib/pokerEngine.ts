@@ -48,7 +48,7 @@ export function applyPokerAction(
   let stake = currentRd.stake || 0;
   let lastBy = currentRd.lastBy;
   let lastRaiser = currentRd.lastRaiser;
-  let minRaise = currentRd.minRaise || 10;
+  let minRaise = currentRd.minRaise || state.anteAmt || 5;
   let street = currentRd.street || 0;
   let phase = currentRd.phase;
   let winners = currentRd.winners || [];
@@ -62,7 +62,8 @@ export function applyPokerAction(
     folded[id] = 1;
     delete acted[id];
     lastBy = `${me} folded`;
-    log.push(`${me} folded`);
+    const myContrib = contrib[id] || 0;
+    log.push(myContrib > 0 ? `${me} folded (forfeited ${money(myContrib)} to pot)` : `${me} folded`);
 
     const remaining = currentRd.parts.filter(pId => !folded[pId]);
     if (remaining.length === 1) {
@@ -203,15 +204,22 @@ export function applyPokerAction(
   const order = state.players.map(p => p.id).filter(pId => currentRd.parts.includes(pId));
 
   if ((allActed && allMatched) || noMoreBetting) {
+    const activeNames = currentActive.map(pId => players.find(p => p.id === pId)?.name || pId);
+    const namesStr = activeNames.length === 2 ? `${activeNames[0]} and ${activeNames[1]}` : activeNames.join(', ');
+
     if (noMoreBetting && street !== 3) {
       street = 3;
       phase = 'result';
       winners = [];
-      log.push('— All players All-In! Board dealt to River · Showdown —');
+      if (canActPlayers.length === 0) {
+        log.push(`— ${namesStr} are All-In! Remaining community cards dealt to River · Showdown —`);
+      } else {
+        log.push(`— All-In showdown between ${namesStr}! Remaining community cards dealt to River —`);
+      }
     } else if (street === 3) {
       phase = 'result';
       winners = [];
-      log.push('— Showdown: Tap the winner(s) of each pot —');
+      log.push(`— Betting complete · Showdown between ${namesStr} —`);
     } else {
       street = street + 1;
       Object.keys(st).forEach(k => delete st[k]);
@@ -221,9 +229,9 @@ export function applyPokerAction(
       lastRaiser = null;
       minRaise = state.anteAmt || 10;
       const streetLabels = ['Pre-flop', 'Flop', 'Turn', 'River'];
-      const desc = street === 1 ? 'Loop 1: Flop revealed (3 cards open)' : street === 2 ? 'Loop 2: Turn revealed (4th card open)' : 'Loop 3: River revealed (5th card open)';
+      const desc = street === 1 ? 'Flop revealed (3 cards open)' : street === 2 ? 'Turn revealed (4th card open)' : 'River revealed (5th card open)';
       lastBy = `${streetLabels[street]} dealt`;
-      log.push(`— ${desc} —`);
+      log.push(`— Bets matched · ${desc} —`);
 
       // Post-flop action starts clockwise from Dealer (usually SB or next active player)
       const dealerId = currentRd.dealer || order[0];
@@ -280,7 +288,7 @@ export function applyPokerAction(
     if (evalRes.bestPlayerIds.length > 0 && winners.length === 0) {
       winners = evalRes.bestPlayerIds;
     }
-    const { pots } = calculatePots(contrib, folded);
+    const { pots } = calculatePots(contrib, folded, allIn);
     const autoPotWinners: Record<string, string[]> = {};
     pots.forEach(pot => {
       const eligEval = evaluateAllPokerHands(currentRd.hands!, board || [], pot.eligiblePlayerIds);
@@ -338,7 +346,7 @@ export function settlePokerShowdown(
   potWinners: Record<string, string[]>
 ): Omit<PokerSettleState, 'round' | 'balanceMode'> & { round: null } {
   const rd = state.round;
-  const { pots, totalPot } = calculatePots(rd.contrib || {}, rd.folded || {});
+  const { pots, totalPot } = calculatePots(rd.contrib || {}, rd.folded || {}, rd.allIn || {});
   if (!pots.length || totalPot <= 0) {
     return {
       players: state.players,
@@ -456,14 +464,18 @@ export function startOnlinePokerRound(params: {
   const dIdx = ((params.dealerIdx % activeIds.length) + activeIds.length) % activeIds.length;
   const dealerId = activeIds[dIdx];
   const dealerName = active[dIdx].name;
-  const minBet = params.minBet || 10;
+
+  const bootAmt = Math.max(0, Math.floor(Number(params.ante?.amt || 0)));
+  const bootMode = params.ante?.mode === 'admin' ? 'admin' : 'each';
+  const antePerPlayer = bootMode === 'admin' && bootAmt > 0
+    ? Math.max(1, Math.floor(bootAmt / activeIds.length) || 1)
+    : Math.max(1, bootAmt || 5);
+  const minBet = params.minBet !== undefined ? Math.max(1, params.minBet) : antePerPlayer;
 
   const contrib: Record<string, number> = {};
   const allIn: Record<string, boolean> = {};
   activeIds.forEach(id => { contrib[id] = 0; });
 
-  const bootAmt = Math.max(0, Math.floor(Number(params.ante?.amt || 0)));
-  const bootMode = params.ante?.mode === 'admin' ? 'admin' : 'each';
   const log: string[] = [`Hand #${params.rno} dealt · Dealer button is ${dealerName} [D]`];
 
   if (bootAmt > 0) {

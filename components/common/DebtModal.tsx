@@ -8,6 +8,7 @@ interface DebtModalProps {
   debts: Record<string, number>;
   myPlayerId?: string | null;
   isHost?: boolean;
+  sessionMode?: 'tracker' | 'online';
   onClose: () => void;
   onSettle: (key: string) => void;
   onSettleAll: () => void;
@@ -18,10 +19,12 @@ export default function DebtModal({
   debts,
   myPlayerId,
   isHost = true,
+  sessionMode = 'tracker',
   onClose,
   onSettle,
   onSettleAll,
 }: DebtModalProps) {
+  const isOnline = sessionMode === 'online';
   const allDebtEntries = Object.entries(debts || {}).filter(([, amt]) => amt > 0);
   const hasHouseDebt = allDebtEntries.some(([k]) => k.startsWith('house|') || k.endsWith('|house'));
   const effectivePlayers: Player[] =
@@ -89,10 +92,14 @@ export default function DebtModal({
         <div className="debt-modal-header">
           <div>
             <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 18 }}>
-              <span>💸</span> You Owe Who &amp; Who Owes You
+              <span>💸</span> {isOnline ? 'You Owe Who & Who Owes You' : 'Who Owes Who — Table Ledger'}
             </h2>
             <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
-              Personal settlement ledger for <b>{activePlayer?.name || 'Player'}</b>
+              {isOnline ? (
+                <>Personal settlement ledger for <b>{activePlayer?.name || 'Player'}</b></>
+              ) : (
+                'Complete settlement matrix across all players at the table'
+              )}
             </div>
           </div>
           <button className="sm" onClick={onClose} style={{ padding: '4px 12px' }}>
@@ -107,8 +114,8 @@ export default function DebtModal({
             </p>
           ) : (
             <>
-              {/* If Game Operator / Host, allow inspecting any player's ledger + show full Who Owes Who Matrix */}
-              {(isHost || !myPlayerId) && effectivePlayers.length > 1 && (
+              {/* Online Only: If Game Operator / Host, allow inspecting any player's personal ledger */}
+              {isOnline && (isHost || !myPlayerId) && effectivePlayers.length > 1 && (
                 <div style={{ marginBottom: 14 }}>
                   <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>
                     {isHost ? '👁 Game Operator View — Inspect ledger for player:' : 'Viewing ledger for player:'}
@@ -142,7 +149,7 @@ export default function DebtModal({
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <div style={{ fontSize: 13, fontWeight: 900, color: '#f7d97e', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
-                      📊 Complete &ldquo;Who Owes Who&rdquo; Table Matrix (Game Operator View)
+                      📊 Complete &ldquo;Who Owes Who&rdquo; Table Matrix {isOnline ? '(Game Operator View)' : ''}
                     </div>
                     <span className="mut" style={{ fontSize: 11.5 }}>Row owes Column</span>
                   </div>
@@ -193,169 +200,243 @@ export default function DebtModal({
                 </div>
               )}
 
-              {/* Net Summary Banner */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
-                  gap: 10,
-                  marginBottom: 16,
-                  background: 'rgba(0,0,0,0.35)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 12,
-                  padding: '12px 14px',
-                  textAlign: 'center',
-                }}
-              >
-                <div>
-                  <div className="mut" style={{ fontSize: 11, textTransform: 'uppercase' }}>You Owe</div>
-                  <div style={{ fontSize: 18, fontWeight: 900, color: totalYouOwe > 0 ? '#f87171' : 'var(--mut)', marginTop: 2 }}>
-                    {money(totalYouOwe)}
+              {/* IRL Mode: Individual Debt Settlement List (replaces personal You Owe / Owes You tables) */}
+              {!isOnline && (
+                <div
+                  style={{
+                    background: 'rgba(0,0,0,0.3)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 12,
+                    padding: 12,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <h3 style={{ margin: 0, fontSize: 13.5, color: '#f7d97e', textTransform: 'uppercase', letterSpacing: 0.7 }}>
+                      🤝 Active Settlements
+                    </h3>
+                    <span className="mut" style={{ fontSize: 12 }}>
+                      {allDebtEntries.length} active {allDebtEntries.length === 1 ? 'debt' : 'debts'}
+                    </span>
                   </div>
+                  {allDebtEntries.length === 0 ? (
+                    <div className="mut" style={{ padding: '16px 8px', textAlign: 'center', fontSize: 12.5 }}>
+                      ✓ All players are settled up! No outstanding table debts.
+                    </div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: 'var(--mut)', fontSize: 11 }}>
+                          <th style={{ textAlign: 'left', padding: '6px 4px' }}>Who Owes Who</th>
+                          <th style={{ textAlign: 'right', padding: '6px 4px' }}>Amount</th>
+                          <th style={{ textAlign: 'right', padding: '6px 4px' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allDebtEntries.map(([key, amt]) => {
+                          const [fromId, toId] = key.split('|');
+                          const fromP = playerMap.get(fromId);
+                          const toP = playerMap.get(toId);
+                          return (
+                            <tr key={key} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                              <td style={{ padding: '8px 4px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                  {dtAv(fromId)}
+                                  <b>{fromP?.name || fromId}</b>
+                                  <span className="mut" style={{ fontSize: 11.5 }}>owes</span>
+                                  {dtAv(toId)}
+                                  <b>{toP?.name || toId}</b>
+                                </div>
+                              </td>
+                              <td style={{ padding: '8px 4px', textAlign: 'right', color: '#f87171', fontWeight: 900 }}>
+                                {money(amt)}
+                              </td>
+                              <td style={{ padding: '8px 4px', textAlign: 'right' }}>
+                                <button
+                                  type="button"
+                                  className="sm good"
+                                  style={{ padding: '3px 8px', fontSize: 11 }}
+                                  onClick={() => onSettle(key)}
+                                >
+                                  ✓ Settle
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
-                <div>
-                  <div className="mut" style={{ fontSize: 11, textTransform: 'uppercase' }}>Owes You</div>
-                  <div style={{ fontSize: 18, fontWeight: 900, color: totalOwesYou > 0 ? '#4ade80' : 'var(--mut)', marginTop: 2 }}>
-                    {money(totalOwesYou)}
-                  </div>
-                </div>
-                <div>
-                  <div className="mut" style={{ fontSize: 11, textTransform: 'uppercase' }}>Your Net</div>
+              )}
+
+              {/* Online Mode Only: Personal Net Summary Banner & You Owe Who / Who Owes You */}
+              {isOnline && (
+                <>
+                  {/* Net Summary Banner */}
                   <div
                     style={{
-                      fontSize: 18,
-                      fontWeight: 900,
-                      color: netVal > 0 ? '#4ade80' : netVal < 0 ? '#f87171' : 'var(--mut)',
-                      marginTop: 2,
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(3, 1fr)',
+                      gap: 10,
+                      marginBottom: 16,
+                      background: 'rgba(0,0,0,0.35)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: 12,
+                      padding: '12px 14px',
+                      textAlign: 'center',
                     }}
                   >
-                    {netVal > 0 ? `+${money(netVal)}` : netVal < 0 ? `−${money(Math.abs(netVal))}` : '₹0'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Two Side-by-Side or Stacked Tables: 1. You Owe Who, 2. Who Owes You */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
-                {/* Table 1: You Owe Who */}
-                <div
-                  style={{
-                    background: 'rgba(239, 68, 68, 0.06)',
-                    border: '1px solid rgba(239, 68, 68, 0.28)',
-                    borderRadius: 12,
-                    padding: 12,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <h3 style={{ margin: 0, fontSize: 14, color: '#fca5a5', textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                      📤 You Owe Who
-                    </h3>
-                    <b style={{ color: '#f87171', fontSize: 14 }}>{money(totalYouOwe)}</b>
-                  </div>
-
-                  {youOweList.length === 0 ? (
-                    <div className="mut" style={{ padding: '18px 8px', textAlign: 'center', fontSize: 12.5 }}>
-                      ✓ You don&apos;t owe anyone right now.
+                    <div>
+                      <div className="mut" style={{ fontSize: 11, textTransform: 'uppercase' }}>You Owe</div>
+                      <div style={{ fontSize: 18, fontWeight: 900, color: totalYouOwe > 0 ? '#f87171' : 'var(--mut)', marginTop: 2 }}>
+                        {money(totalYouOwe)}
+                      </div>
                     </div>
-                  ) : (
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: 'var(--mut)', fontSize: 11 }}>
-                          <th style={{ textAlign: 'left', padding: '6px 4px' }}>Player</th>
-                          <th style={{ textAlign: 'right', padding: '6px 4px' }}>You Owe</th>
-                          {isHost && <th style={{ textAlign: 'right', padding: '6px 4px' }}>Action</th>}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {youOweList.map(item => (
-                          <tr key={item.key} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                            <td style={{ padding: '8px 4px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {dtAv(item.player.id)}
-                                <b>{item.player.name}</b>
-                              </div>
-                            </td>
-                            <td style={{ padding: '8px 4px', textAlign: 'right', color: '#f87171', fontWeight: 900 }}>
-                              {money(item.amount)}
-                            </td>
-                            {isHost && (
-                              <td style={{ padding: '8px 4px', textAlign: 'right' }}>
-                                <button
-                                  type="button"
-                                  className="sm good"
-                                  style={{ padding: '3px 8px', fontSize: 11 }}
-                                  onClick={() => onSettle(item.key)}
-                                >
-                                  ✓ Settle
-                                </button>
-                              </td>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-
-                {/* Table 2: Who Owes You */}
-                <div
-                  style={{
-                    background: 'rgba(34, 197, 94, 0.06)',
-                    border: '1px solid rgba(34, 197, 94, 0.28)',
-                    borderRadius: 12,
-                    padding: 12,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <h3 style={{ margin: 0, fontSize: 14, color: '#86efac', textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                      📥 Who Owes You
-                    </h3>
-                    <b style={{ color: '#4ade80', fontSize: 14 }}>{money(totalOwesYou)}</b>
+                    <div>
+                      <div className="mut" style={{ fontSize: 11, textTransform: 'uppercase' }}>Owes You</div>
+                      <div style={{ fontSize: 18, fontWeight: 900, color: totalOwesYou > 0 ? '#4ade80' : 'var(--mut)', marginTop: 2 }}>
+                        {money(totalOwesYou)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mut" style={{ fontSize: 11, textTransform: 'uppercase' }}>Your Net</div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 900,
+                          color: netVal > 0 ? '#4ade80' : netVal < 0 ? '#f87171' : 'var(--mut)',
+                          marginTop: 2,
+                        }}
+                      >
+                        {netVal > 0 ? `+${money(netVal)}` : netVal < 0 ? `−${money(Math.abs(netVal))}` : '₹0'}
+                      </div>
+                    </div>
                   </div>
 
-                  {owesYouList.length === 0 ? (
-                    <div className="mut" style={{ padding: '18px 8px', textAlign: 'center', fontSize: 12.5 }}>
-                      No one owes you money right now.
+                  {/* Two Side-by-Side or Stacked Tables: 1. You Owe Who, 2. Who Owes You */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+                    {/* Table 1: You Owe Who */}
+                    <div
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.06)',
+                        border: '1px solid rgba(239, 68, 68, 0.28)',
+                        borderRadius: 12,
+                        padding: 12,
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <h3 style={{ margin: 0, fontSize: 14, color: '#fca5a5', textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                          📤 You Owe Who
+                        </h3>
+                        <b style={{ color: '#f87171', fontSize: 14 }}>{money(totalYouOwe)}</b>
+                      </div>
+
+                      {youOweList.length === 0 ? (
+                        <div className="mut" style={{ padding: '18px 8px', textAlign: 'center', fontSize: 12.5 }}>
+                          ✓ You don&apos;t owe anyone right now.
+                        </div>
+                      ) : (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: 'var(--mut)', fontSize: 11 }}>
+                              <th style={{ textAlign: 'left', padding: '6px 4px' }}>Player</th>
+                              <th style={{ textAlign: 'right', padding: '6px 4px' }}>You Owe</th>
+                              {isHost && <th style={{ textAlign: 'right', padding: '6px 4px' }}>Action</th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {youOweList.map(item => (
+                              <tr key={item.key} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                                <td style={{ padding: '8px 4px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    {dtAv(item.player.id)}
+                                    <b>{item.player.name}</b>
+                                  </div>
+                                </td>
+                                <td style={{ padding: '8px 4px', textAlign: 'right', color: '#f87171', fontWeight: 900 }}>
+                                  {money(item.amount)}
+                                </td>
+                                {isHost && (
+                                  <td style={{ padding: '8px 4px', textAlign: 'right' }}>
+                                    <button
+                                      type="button"
+                                      className="sm good"
+                                      style={{ padding: '3px 8px', fontSize: 11 }}
+                                      onClick={() => onSettle(item.key)}
+                                    >
+                                      ✓ Settle
+                                    </button>
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
                     </div>
-                  ) : (
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: 'var(--mut)', fontSize: 11 }}>
-                          <th style={{ textAlign: 'left', padding: '6px 4px' }}>Player</th>
-                          <th style={{ textAlign: 'right', padding: '6px 4px' }}>Owes You</th>
-                          {isHost && <th style={{ textAlign: 'right', padding: '6px 4px' }}>Action</th>}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {owesYouList.map(item => (
-                          <tr key={item.key} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                            <td style={{ padding: '8px 4px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {dtAv(item.player.id)}
-                                <b>{item.player.name}</b>
-                              </div>
-                            </td>
-                            <td style={{ padding: '8px 4px', textAlign: 'right', color: '#4ade80', fontWeight: 900 }}>
-                              {money(item.amount)}
-                            </td>
-                            {isHost && (
-                              <td style={{ padding: '8px 4px', textAlign: 'right' }}>
-                                <button
-                                  type="button"
-                                  className="sm good"
-                                  style={{ padding: '3px 8px', fontSize: 11 }}
-                                  onClick={() => onSettle(item.key)}
-                                >
-                                  ✓ Settle
-                                </button>
-                              </td>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              </div>
+
+                    {/* Table 2: Who Owes You */}
+                    <div
+                      style={{
+                        background: 'rgba(34, 197, 94, 0.06)',
+                        border: '1px solid rgba(34, 197, 94, 0.28)',
+                        borderRadius: 12,
+                        padding: 12,
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <h3 style={{ margin: 0, fontSize: 14, color: '#86efac', textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                          📥 Who Owes You
+                        </h3>
+                        <b style={{ color: '#4ade80', fontSize: 14 }}>{money(totalOwesYou)}</b>
+                      </div>
+
+                      {owesYouList.length === 0 ? (
+                        <div className="mut" style={{ padding: '18px 8px', textAlign: 'center', fontSize: 12.5 }}>
+                          No one owes you money right now.
+                        </div>
+                      ) : (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: 'var(--mut)', fontSize: 11 }}>
+                              <th style={{ textAlign: 'left', padding: '6px 4px' }}>Player</th>
+                              <th style={{ textAlign: 'right', padding: '6px 4px' }}>Owes You</th>
+                              {isHost && <th style={{ textAlign: 'right', padding: '6px 4px' }}>Action</th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {owesYouList.map(item => (
+                              <tr key={item.key} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                                <td style={{ padding: '8px 4px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    {dtAv(item.player.id)}
+                                    <b>{item.player.name}</b>
+                                  </div>
+                                </td>
+                                <td style={{ padding: '8px 4px', textAlign: 'right', color: '#4ade80', fontWeight: 900 }}>
+                                  {money(item.amount)}
+                                </td>
+                                {isHost && (
+                                  <td style={{ padding: '8px 4px', textAlign: 'right' }}>
+                                    <button
+                                      type="button"
+                                      className="sm good"
+                                      style={{ padding: '3px 8px', fontSize: 11 }}
+                                      onClick={() => onSettle(item.key)}
+                                    >
+                                      ✓ Settle
+                                    </button>
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
 
               {isHost && allDebtEntries.length > 0 && (
                 <div style={{ marginTop: 14, textAlign: 'right' }}>

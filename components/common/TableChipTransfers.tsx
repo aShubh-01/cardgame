@@ -96,8 +96,8 @@ export default function TableChipTransfers({
       round.winners && round.winners.length > 0
         ? round.winners
         : round.winner
-        ? [round.winner]
-        : [];
+          ? [round.winner]
+          : [];
     const winKey = `${round.no}_${winnerIds.join(',')}`;
     if (!winnerIds.length || prevWinnerKeyRef.current === winKey) return;
     prevWinnerKeyRef.current = winKey;
@@ -132,20 +132,6 @@ export default function TableChipTransfers({
 
   return (
     <>
-      {/* 2D Table Spin Control Pill */}
-      {onSpinTable && (
-        <button
-          type="button"
-          className="table-spin-btn"
-          onClick={onSpinTable}
-          title="Spin the 2D Casino Table"
-        >
-          <span className="spin-icon" style={{ transform: `rotate(${tableRotationDeg}deg)` }}>
-            🎡
-          </span>
-          <span>Spin Table</span>
-        </button>
-      )}
 
       {/* Flying Chips Layer */}
       {flyingChips.map((chip, i) => {

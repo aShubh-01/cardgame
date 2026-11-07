@@ -11,6 +11,7 @@ import GoogleConfigModal from '@/components/common/GoogleConfigModal';
 import ConfirmModal from '@/components/common/ConfirmModal';
 import JoinRoomModal from '@/components/common/JoinRoomModal';
 import OperatorModals from '@/components/common/OperatorModals';
+import LiveChat from '@/components/common/LiveChat';
 import RoomCodeBanner from '@/components/common/RoomCodeBanner';
 import BlackjackTable from '@/components/blackjack/BlackjackTable';
 import BlackjackControls from '@/components/blackjack/BlackjackControls';
@@ -256,6 +257,7 @@ export default function BlackjackGame() {
         onTriggerDisconnect={engine.triggerGoDisconnect}
         onCheckTimeout={engine.checkGoTimeout}
         onOpenDebtModal={() => engine.setShowDebtModal(true)}
+        onKickPlayer={engine.removePlayer}
       />
 
       <main id="app">
@@ -293,6 +295,7 @@ export default function BlackjackGame() {
             myPlayerId={myPlayer?.id || null}
             sessionMode={sessionMode}
             isHost={isHost}
+            playerBets={gameState.playerBets}
             onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
           />
           <div className="mut" style={{ textAlign: 'center', marginTop: 6 }} id="hint">
@@ -315,7 +318,10 @@ export default function BlackjackGame() {
           isHost={isHost}
           myPlayerId={myPlayer?.id || null}
           readyPlayers={gameState.readyPlayers}
+          playerBets={gameState.playerBets}
+          onSetPlayerBet={engine.setPlayerBet}
           onToggleReady={engine.toggleReady}
+          onSitToggle={engine.toggleSit}
           onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
           onSetDealerPlayerId={handleSetDealerPlayerId}
           onSetDealerRotation={handleSetDealerRotation}
@@ -331,6 +337,15 @@ export default function BlackjackGame() {
       </main>
 
       <RoundHistory history={gameState.hist} />
+
+      {sessionMode === 'online' && engine.sessionId && (
+        <LiveChat
+          messages={gameState.chatMessages || []}
+          myPlayerId={myPlayer?.id || null}
+          isGameOperator={Boolean(gameState.isGameOperator)}
+          onSend={engine.sendChatMessage}
+        />
+      )}
 
       {/* Modals */}
       {engine.confirmModal && (
@@ -351,6 +366,7 @@ export default function BlackjackGame() {
           debts={gameState.debts}
           myPlayerId={myPlayer?.id || null}
           isHost={isHost}
+          sessionMode={sessionMode}
           onClose={() => engine.setShowDebtModal(false)}
           onSettle={engine.settleDebt}
           onSettleAll={engine.settleAllDebts}

@@ -42,7 +42,7 @@ function settleTeenPattiRoundOnServer(
 ) {
   if (!round || round.settled) return;
 
-  const { pots, totalPot } = calculatePots(round.contrib || {}, round.folded || {});
+  const { pots, totalPot } = calculatePots(round.contrib || {}, round.folded || {}, round.allIn || {});
   if (!pots.length || totalPot <= 0) return;
 
   const potWinners: Record<string, string[]> = { ...(round.potWinners || {}) };
@@ -339,18 +339,76 @@ export async function POST(
         if (isRoundActive) {
           return NextResponse.json({ error: 'Wait until the current round finishes to ready up.' }, { status: 400 });
         }
+        if (body.betAmount !== undefined) {
+          sessionDoc.playerBets = sessionDoc.playerBets || {};
+          sessionDoc.playerBets[requestingPlayer.id] = Math.max(1, Math.floor(Number(body.betAmount) || 50));
+          sessionDoc.markModified('playerBets');
+        }
         const readyMap = { ...(sessionDoc.readyPlayers || {}) };
         const nextReady = !readyMap[requestingPlayer.id];
         readyMap[requestingPlayer.id] = nextReady;
         sessionDoc.readyPlayers = readyMap;
+        const myWager = sessionDoc.playerBets?.[requestingPlayer.id];
+        const wagerTxt = myWager ? ` (Wager: ${money(myWager)})` : '';
         appendActivityLog(
           sessionDoc,
           nextReady
-            ? `👍 ${requestingPlayer.name} is READY for the next round`
+            ? `👍 ${requestingPlayer.name} is READY${wagerTxt} for the next round`
             : `⏳ ${requestingPlayer.name} un-readied`
         );
         promoteQueuedGameOperatorIfIdle(sessionDoc);
         sessionDoc.markModified('readyPlayers');
+        await sessionDoc.save();
+        return NextResponse.json(sanitizeStateForClient(sessionDoc.toObject(), userEmail));
+      }
+
+      case 'SET_PLAYER_BET': {
+        const targetPid = body.targetPlayerId || requestingPlayer?.id;
+        const targetPl = players.find((p: any) => p.id === targetPid);
+        if (!targetPl) {
+          return NextResponse.json({ error: 'Player not found.' }, { status: 404 });
+        }
+        if (targetPl.id !== requestingPlayer?.id && !isGO && !isOwner) {
+          return NextResponse.json({ error: 'Permission denied.' }, { status: 403 });
+        }
+        if (isRoundActive) {
+          return NextResponse.json({ error: 'Cannot change wager during an active hand.' }, { status: 400 });
+        }
+        const amt = Math.max(1, Math.floor(Number(body.betAmount) || 50));
+        sessionDoc.playerBets = sessionDoc.playerBets || {};
+        sessionDoc.playerBets[targetPl.id] = amt;
+        sessionDoc.markModified('playerBets');
+        appendActivityLog(sessionDoc, `🪙 ${targetPl.name} set Blackjack wager to ${money(amt)}`);
+        await sessionDoc.save();
+        return NextResponse.json(sanitizeStateForClient(sessionDoc.toObject(), userEmail));
+      }
+
+      case 'TOGGLE_SIT': {
+        const targetPid = body.targetPlayerId || requestingPlayer?.id;
+        const targetPl = players.find((p: any) => p.id === targetPid);
+        if (!targetPl) {
+          return NextResponse.json({ error: 'Player not found.' }, { status: 404 });
+        }
+        if (targetPl.id !== requestingPlayer?.id && !isGO && !isOwner) {
+          return NextResponse.json({ error: 'Permission denied.' }, { status: 403 });
+        }
+        if (isRoundActive) {
+          return NextResponse.json({ error: 'Cannot sit out or rejoin during an active hand.' }, { status: 400 });
+        }
+        targetPl.sit = !targetPl.sit;
+        if (targetPl.sit && sessionDoc.readyPlayers?.[targetPl.id]) {
+          const readyMap = { ...(sessionDoc.readyPlayers || {}) };
+          delete readyMap[targetPl.id];
+          sessionDoc.readyPlayers = readyMap;
+          sessionDoc.markModified('readyPlayers');
+        }
+        appendActivityLog(
+          sessionDoc,
+          targetPl.sit
+            ? `⏸ ${targetPl.name} chose to skip the next round (sitting out)`
+            : `▶️ ${targetPl.name} rejoined table for the next round`
+        );
+        sessionDoc.markModified('players');
         await sessionDoc.save();
         return NextResponse.json(sanitizeStateForClient(sessionDoc.toObject(), userEmail));
       }
@@ -477,23 +535,14 @@ export async function POST(
           sessionDoc.markModified('players');
         }
         if (isGO || isOwner) {
-          const candidatePlayers = players.filter(
-            (p: any) => !p.isGameOperator && p.userId && p.userId.toLowerCase() !== goEmail && p.isConnected !== false
+          const now = Date.now();
+          sessionDoc.goDisconnectedAt = now;
+          sessionDoc.goLastHeartbeat = 0;
+          appendActivityLog(
+            sessionDoc,
+            `⚠️ Game Operator disconnected · 1 min reconnect grace period started`
           );
-          if (candidatePlayers.length > 0 && sessionDoc.goDisconnectEvent?.status !== 'volunteering') {
-            const now = Date.now();
-            sessionDoc.goDisconnectEvent = {
-              disconnectedAt: now,
-              expiresAt: now + 15000,
-              status: 'volunteering',
-            };
-            sessionDoc.goLastHeartbeat = 0;
-            appendActivityLog(
-              sessionDoc,
-              `⚠️ Game Operator disconnected! 15s volunteer window opened for all players.`
-            );
-            sessionDoc.markModified('goDisconnectEvent');
-          }
+          sessionDoc.markModified('goDisconnectedAt');
         }
         await sessionDoc.save();
         return NextResponse.json(sanitizeStateForClient(sessionDoc.toObject(), userEmail));
@@ -526,6 +575,77 @@ export async function POST(
         });
         sessionDoc.chatMessages = chatMessages.slice(-100);
         sessionDoc.markModified('chatMessages');
+        await sessionDoc.save();
+        return NextResponse.json(sanitizeStateForClient(sessionDoc.toObject(), userEmail));
+      }
+
+      /* ──────────────── KICK PLAYER (Game Operator / Owner Only) ──────────────── */
+      case 'KICK_PLAYER': {
+        if (!isGO && !isOwner) {
+          return NextResponse.json(
+            { error: 'Only the Game Operator or Session Owner can kick players.' },
+            { status: 403 }
+          );
+        }
+        const targetPlayerId = body.targetPlayerId || body.playerId;
+        if (!targetPlayerId) {
+          return NextResponse.json({ error: 'Player ID is required to kick.' }, { status: 400 });
+        }
+        const targetIndex = players.findIndex((p: any) => p.id === targetPlayerId);
+        if (targetIndex < 0) {
+          return NextResponse.json({ error: 'Player not found in this room.' }, { status: 404 });
+        }
+        const targetPlayer = players[targetIndex];
+        if (targetPlayer.isGameOperator) {
+          return NextResponse.json({ error: 'Cannot kick the Game Operator.' }, { status: 400 });
+        }
+        if (targetPlayer.userId && targetPlayer.userId.toLowerCase() === ownerEmail) {
+          return NextResponse.json({ error: 'Cannot kick the Session Owner.' }, { status: 400 });
+        }
+
+        const kickedName = targetPlayer.name;
+
+        // Fold the player if currently in an active round
+        if (round && round.parts && round.parts.includes(targetPlayerId)) {
+          if (!round.folded) round.folded = {};
+          round.folded[targetPlayerId] = 1;
+          sessionDoc.markModified('round');
+        }
+
+        // Remove from players array
+        players.splice(targetIndex, 1);
+        sessionDoc.markModified('players');
+
+        // Clear ready state
+        if (sessionDoc.readyPlayers && targetPlayerId in sessionDoc.readyPlayers) {
+          delete sessionDoc.readyPlayers[targetPlayerId];
+          sessionDoc.markModified('readyPlayers');
+        }
+
+        // Clean up any pending chip requests
+        if (Array.isArray(sessionDoc.chipRequests)) {
+          sessionDoc.chipRequests = sessionDoc.chipRequests.filter(
+            (r: any) => r.playerId !== targetPlayerId
+          );
+          sessionDoc.markModified('chipRequests');
+        }
+
+        // Audit log
+        appendActivityLog(sessionDoc, `👢 ${kickedName} was kicked from the session by Game Operator`);
+
+        // System notification in Live Chat
+        const chatMessages = Array.isArray(sessionDoc.chatMessages) ? [...sessionDoc.chatMessages] : [];
+        chatMessages.push({
+          id: 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+          senderId: '__system__',
+          senderName: 'System',
+          senderRole: 'go',
+          text: `📢 ${kickedName} was kicked from the room by the Game Operator.`,
+          createdAt: Date.now(),
+        });
+        sessionDoc.chatMessages = chatMessages.slice(-100);
+        sessionDoc.markModified('chatMessages');
+
         await sessionDoc.save();
         return NextResponse.json(sanitizeStateForClient(sessionDoc.toObject(), userEmail));
       }
@@ -863,7 +983,7 @@ export async function POST(
             hands,
             boardCards,
             deck,
-            minBet: Math.max(10, bootMode === 'each' && bootAmt > 0 ? bootAmt : 10),
+            minBet: Math.max(1, bootMode === 'admin' && bootAmt > 0 ? Math.floor(bootAmt / activePlayers.length) || 1 : (bootAmt || 5)),
             ante: { mode: bootMode, amt: bootAmt },
             adminPlayerId: hostPlayer?.id,
           });
@@ -878,12 +998,10 @@ export async function POST(
           const playerStatus: Record<string, 'blind' | 'seen'> = {};
           const contrib: Record<string, number> = {};
           const allIn: Record<string, boolean> = {};
-          const baseStake = Math.max(
-            10,
-            bootMode === 'admin' && bootAmt > 0
-              ? Math.max(10, Math.floor(bootAmt / activePlayers.length) || 10)
-              : bootAmt || 10
-          );
+          const rawAnte = bootMode === 'admin' && bootAmt > 0
+            ? Math.floor(bootAmt / activePlayers.length)
+            : bootAmt;
+          const baseStake = Math.max(1, rawAnte > 0 ? rawAnte : 5);
 
           for (const pl of activePlayers) {
             const d = dealCards(deck, 3);
@@ -1016,7 +1134,7 @@ export async function POST(
           const hands: Record<string, any[]> = {};
           const contrib: Record<string, number> = {};
           const bjStatus: Record<string, 'playing' | 'stood' | 'busted' | 'blackjack' | 'doubled'> = {};
-          const defaultBet = Math.max(10, Number(body.defaultBet) || 100);
+          const defaultBet = Math.max(10, Number(body.defaultBet) || 50);
 
           let dealerId = body.dealerPlayerId || sessionDoc.bjDealerId;
           if (!dealerId || (dealerId !== 'house' && !activePlayers.some((p: any) => p.id === dealerId))) {
@@ -1039,14 +1157,16 @@ export async function POST(
               ? 'Casino House'
               : activePlayers.find((p: any) => p.id === dealerId)?.name || 'Dealer';
 
+          const playerBets = sessionDoc.playerBets || body.playerBets || {};
           for (const pl of bettingPlayers) {
             const d = dealCards(deck, 2);
             hands[pl.id] = d.dealt;
             deck = d.remaining;
 
-            let bet = defaultBet;
+            const chosenBet = Math.max(1, Number(playerBets[pl.id]) || Number(body.playerBets?.[pl.id]) || defaultBet);
+            let bet = chosenBet;
             if (sessionDoc.balanceMode && typeof pl.balance === 'number') {
-              bet = Math.min(pl.balance, defaultBet);
+              bet = Math.min(pl.balance, chosenBet);
               pl.balance = Math.max(0, pl.balance - bet);
             }
             contrib[pl.id] = bet;
@@ -1067,7 +1187,7 @@ export async function POST(
             contrib,
             folded: {},
             turn: firstPlaying.id,
-            stake: defaultBet,
+            stake: Object.values(contrib).length ? Math.max(...Object.values(contrib)) : defaultBet,
             stack: [],
             hands,
             dealer: dealerId,
@@ -1341,8 +1461,14 @@ export async function POST(
 
         if (subAction === 'bet' || subAction === 'raise' || subAction === 'allin') {
           const isBlind = (round.playerStatus?.[id] || 'blind') === 'blind';
-          const baseUnit = Math.max(10, round.stake || sessionDoc.ante?.amt || 10);
-          const { chaalCost } = getTeenPattiBetAmounts(baseUnit, isBlind, false);
+          const anteShare = sessionDoc.ante?.mode === 'admin' && sessionDoc.ante.amt > 0
+            ? Math.floor(sessionDoc.ante.amt / (round.parts?.length || 1))
+            : sessionDoc.ante?.amt;
+          const baseUnit = Math.max(1, round.stake || (anteShare && anteShare > 0 ? anteShare : 10));
+          const lastBet = round.lastBetAmt && round.lastBetAmt > 0
+            ? { amount: round.lastBetAmt, isBlind: Boolean(round.lastIsBlind) }
+            : null;
+          const { chaalCost } = getTeenPattiBetAmounts(baseUnit, isBlind, false, lastBet);
 
           let actual = actAmt;
           let isAllIn = false;
@@ -1381,12 +1507,18 @@ export async function POST(
             }
           }
 
-          if (actual > chaalCost || (subAction === 'raise' && actual >= chaalCost)) {
-            round.stake = Math.max(round.stake || 10, calcTeenPattiNewBaseStake(actual, isBlind));
+          // In Teen Patti, any normal bet/raise sets the new table stake:
+          // A Blind bet of X sets baseStake = X.
+          // A Seen bet of Y sets baseStake = floor(Y / 2).
+          // Next player must bet at least baseStake (if blind) or 2*baseStake (if seen).
+          if (!isAllIn || actual >= chaalCost) {
+            round.stake = isBlind ? actual : Math.max(1, Math.floor(actual / 2));
           }
 
           round.contrib[id] = (round.contrib[id] || 0) + actual;
           round.lastBy = me;
+          round.lastBetAmt = actual;
+          round.lastIsBlind = isBlind;
           if (isAllIn) {
             round.log.push(`${me} went ALL-IN with ${money(actual)} (${isBlind ? 'Blind' : 'Seen'})! 🚨`);
           } else {
@@ -1403,13 +1535,20 @@ export async function POST(
             canActIds.length === 0 ||
             (canActIds.length === 1 && (round.contrib[canActIds[0]] || 0) >= maxContrib)
           ) {
-            runAutoShowdown(id, '— All active stacks committed (All-In) · Automatic Showdown! —');
+            const activeNames = activeIds.map((pid: string) => players.find((p: any) => p.id === pid)?.name || pid);
+            const namesStr = activeNames.length === 2 ? `${activeNames[0]} and ${activeNames[1]}` : activeNames.join(', ');
+            runAutoShowdown(id, `— All-In Showdown between ${namesStr}! —`);
           } else {
             round.turn = nextOrder(round.turn, round.parts, round.folded, round.allIn);
           }
         } else if (subAction === 'fold') {
           round.folded[id] = 1;
-          round.log.push(`${me} packed (folded)`);
+          const myContrib = round.contrib[id] || 0;
+          round.log.push(
+            myContrib > 0
+              ? `${me} packed (folded, forfeited ${money(myContrib)} to pot)`
+              : `${me} packed (folded)`
+          );
           const remaining = (round.parts || []).filter((pid: string) => !round.folded[pid]);
           if (remaining.length === 1) {
             round.phase = 'result';
@@ -1424,7 +1563,9 @@ export async function POST(
               canActIds.length === 0 ||
               (canActIds.length === 1 && (round.contrib[canActIds[0]] || 0) >= maxContrib)
             ) {
-              runAutoShowdown(undefined, '— Remaining active players are All-In · Automatic Showdown! —');
+              const activeNames = remaining.map((pid: string) => players.find((p: any) => p.id === pid)?.name || pid);
+              const namesStr = activeNames.length === 2 ? `${activeNames[0]} and ${activeNames[1]}` : activeNames.join(', ');
+              runAutoShowdown(undefined, `— All-In Showdown between ${namesStr}! —`);
             } else {
               round.turn = nextOrder(round.turn, round.parts, round.folded, round.allIn);
             }
@@ -1447,7 +1588,7 @@ export async function POST(
             if (actual > 0) {
               round.contrib[id] = (round.contrib[id] || 0) + actual;
               round.log.push(
-                `${me} paid ${money(actual)}${round.allIn[id] ? ' (ALL-IN)' : ''} for Show! 🎴`
+                `${me} paid ${money(actual)}${round.allIn[id] ? ' (ALL-IN)' : ''} for Force Show! 🎴`
               );
             }
           } else {
@@ -1564,7 +1705,7 @@ export async function POST(
               const evalRes = evaluateAllPokerHands(round.hands, round.board || [], activeIds);
               round.handEvaluations = evalRes.evaluations;
               round.winners = evalRes.bestPlayerIds;
-              const { pots } = calculatePots(round.contrib || {}, round.folded || {});
+              const { pots } = calculatePots(round.contrib || {}, round.folded || {}, round.allIn || {});
               const autoPotWinners: Record<string, string[]> = {};
               pots.forEach(pot => {
                 const eligEval = evaluateAllPokerHands(round.hands, round.board || [], pot.eligiblePlayerIds);

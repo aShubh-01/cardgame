@@ -33,6 +33,7 @@ interface PokerControlsProps {
   isHost?: boolean;
   readyPlayers?: Record<string, boolean>;
   onToggleReady?: () => void;
+  onSitToggle?: (id: string) => void;
   onOpenAddMoney?: (playerId: string) => void;
 }
 
@@ -59,6 +60,7 @@ export default function PokerControls({
   isHost = true,
   readyPlayers = {},
   onToggleReady,
+  onSitToggle,
   onOpenAddMoney,
 }: PokerControlsProps) {
   const [betInputStr, setBetInputStr] = useState<string>('50');
@@ -77,13 +79,13 @@ export default function PokerControls({
 
   const isBalMode = !!balanceMode;
   const isOnline = sessionMode === 'online';
-  const seated = players.filter(p => !p.sit && !p.isGameOperator);
+  const seated = players.filter(p => !p.sit && !p.isGameOperator && (!isOnline || p.isConnected !== false));
   const readyCount = seated.filter(p => readyPlayers[p.id]).length;
   const allSeatedReady = !isOnline || (seated.length >= 2 && readyCount === seated.length);
   const isMeReady = Boolean(myPlayerId && readyPlayers[myPlayerId]);
 
   const { pots, totalPot } = round
-    ? calculatePots(round.contrib || {}, round.folded || {})
+    ? calculatePots(round.contrib || {}, round.folded || {}, round.allIn || {})
     : { pots: [], totalPot: 0 };
 
   const streetNames = ['Pre-flop', 'Flop', 'Turn', 'River'];
@@ -105,14 +107,21 @@ export default function PokerControls({
   const canCheck = tc === 0;
   const bal = turnPlayer?.balance || 0;
   const canCallFull = !isBalMode || bal >= tc;
-  const minRaiseStep = Math.max(round?.minRaise || 10, 10);
-  const minAddForRaise = cur === 0 ? minRaiseStep : tc + minRaiseStep;
+  const minRaiseStep = Math.max(
+    1,
+    round?.minRaise ||
+      (ante?.mode === 'admin' && ante?.amt > 0
+        ? Math.floor(ante.amt / (round?.parts?.length || 1)) || 1
+        : ante?.amt || 5)
+  );
+  const minAddForRaise = cur === 0 ? minRaiseStep : tc + 1;
+  const twoXAdd = cur === 0 ? minRaiseStep * 2 : Math.max(minAddForRaise, (cur * 2) - sc);
   const canAffordMinRaise = !isBalMode || bal >= minAddForRaise;
 
   // Update default betInput when turn or street changes
   useEffect(() => {
     if (!round || round.phase !== 'bet') return;
-    const defaultAdd = cur === 0 ? Math.min(isBalMode ? bal : 50, Math.max(50, minRaiseStep)) : minAddForRaise;
+    const defaultAdd = cur === 0 ? Math.min(isBalMode ? bal : minRaiseStep, minRaiseStep) : minAddForRaise;
     setBetInputStr(String(isBalMode ? Math.min(bal, Math.max(tc, defaultAdd)) : defaultAdd));
     setShowCustomRaise(false);
   }, [round?.turn, round?.street, cur, tc, minAddForRaise, isBalMode, bal, minRaiseStep]);
@@ -168,6 +177,10 @@ export default function PokerControls({
 
   const renderOnlineReadyAndRequests = () => {
     if (!isOnline) return null;
+    const allTablePlayers = players.filter(p => !p.isGameOperator);
+    const mePlayer = players.find(p => p.id === myPlayerId);
+    const isMeSitting = Boolean(mePlayer?.sit);
+
     return (
       <div
         style={{
@@ -187,10 +200,40 @@ export default function PokerControls({
           </span>
         </div>
 
-        {seated.length > 0 && (
+        {allTablePlayers.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 10 }}>
-            {seated.map(p => {
+            {allTablePlayers.map(p => {
+              const isDisconnected = p.isConnected === false;
+              const isSitting = Boolean(p.sit);
               const r = Boolean(readyPlayers[p.id]);
+
+              let statusLabel = '⏳';
+              let statusText = p.name;
+              let bg = 'rgba(255,255,255,0.05)';
+              let border = '1px solid rgba(255,255,255,0.12)';
+              let color = 'var(--mut)';
+
+              if (isDisconnected) {
+                statusLabel = '🔌';
+                statusText = `${p.name} (Offline · Auto-skipped)`;
+                border = '1px dashed rgba(239, 68, 68, 0.45)';
+                color = '#fca5a5';
+              } else if (isSitting) {
+                statusLabel = '⏸';
+                statusText = `${p.name} (Skipping / Sitting)`;
+                border = '1px dashed rgba(251, 191, 36, 0.45)';
+                color = '#fde68a';
+              } else if (r) {
+                statusLabel = '👍';
+                statusText = `${p.name} (Ready)`;
+                bg = 'rgba(46, 204, 113, 0.16)';
+                border = '1px solid rgba(46, 204, 113, 0.45)';
+                color = '#2ecc71';
+              } else {
+                statusLabel = '⏳';
+                statusText = `${p.name} (Waiting)`;
+              }
+
               return (
                 <span
                   key={p.id}
@@ -198,13 +241,13 @@ export default function PokerControls({
                     fontSize: 11,
                     padding: '2px 8px',
                     borderRadius: 999,
-                    background: r ? 'rgba(46, 204, 113, 0.16)' : 'rgba(255,255,255,0.05)',
-                    border: r ? '1px solid rgba(46, 204, 113, 0.45)' : '1px solid rgba(255,255,255,0.12)',
-                    color: r ? '#2ecc71' : 'var(--mut)',
+                    background: bg,
+                    border,
+                    color,
                     fontWeight: 700,
                   }}
                 >
-                  {r ? '👍' : '⏳'} {p.name}
+                  {statusLabel} {statusText}
                 </span>
               );
             })}
@@ -213,14 +256,52 @@ export default function PokerControls({
 
         {!isHost && myPlayerId && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button
-              type="button"
-              className={isMeReady ? 'good' : 'gold'}
-              style={{ width: '100%', padding: '10px 14px', fontSize: 13.5, fontWeight: 900 }}
-              onClick={onToggleReady}
-            >
-              {isMeReady ? '✅ Ready! (Click to Unready)' : '👍 Ready for Next Hand'}
-            </button>
+            {isMeSitting ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontSize: 12, color: '#fde68a', textAlign: 'center', background: 'rgba(251, 191, 36, 0.12)', padding: '6px 10px', borderRadius: 8 }}>
+                  ⏸ You are skipping the next hand (sitting out).
+                </div>
+                {onSitToggle && (
+                  <button
+                    type="button"
+                    className="pri"
+                    style={{ width: '100%', padding: '9px 14px', fontSize: 13, fontWeight: 800 }}
+                    onClick={() => onSitToggle(myPlayerId)}
+                  >
+                    ▶️ Rejoin Next Hand
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <button
+                  type="button"
+                  className={isMeReady ? 'good' : 'gold'}
+                  style={{ width: '100%', padding: '10px 14px', fontSize: 13.5, fontWeight: 900 }}
+                  onClick={() => onToggleReady?.()}
+                >
+                  {isMeReady ? '✅ Ready! (Click to Unready)' : '👍 Ready for Next Hand'}
+                </button>
+                {onSitToggle && (
+                  <button
+                    type="button"
+                    className="sm mut"
+                    style={{
+                      width: '100%',
+                      padding: '7px 12px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '1px dashed rgba(255,255,255,0.2)',
+                      color: '#cbd5e1',
+                    }}
+                    onClick={() => onSitToggle(myPlayerId)}
+                  >
+                    ⏸ Skip Next Hand / Sit Out
+                  </button>
+                )}
+              </div>
+            )}
             {isBalMode && onOpenAddMoney && (
               <button
                 type="button"
@@ -393,7 +474,7 @@ export default function PokerControls({
                 onClick={handleStartRound}
               >
                 {isOnline && !allSeatedReady
-                  ? `⏳ Waiting for Players Ready (${readyCount}/${seated.length})`
+                  ? `⏳ Waiting for Players (${readyCount}/${seated.length})`
                   : `🃏 Deal Hand (${seated.length} Players)`}
               </button>
               {seated.length < 2 && (
@@ -535,7 +616,7 @@ export default function PokerControls({
       );
     }
 
-    const isMyTurn = !isOnline || !myPlayerId || round.turn === myPlayerId;
+    const isMyTurn = isOnline ? Boolean(myPlayerId && round.turn === myPlayerId) : true;
 
     if (isOnline && !isMyTurn) {
       return (
@@ -601,6 +682,9 @@ export default function PokerControls({
     });
     const isBetInputValid = !('error' in resolution);
     const betErrorMsg = 'error' in resolution ? resolution.error : '';
+    const foldedContributors = players.filter(
+      p => round.parts.includes(p.id) && round.folded[p.id] && (round.contrib[p.id] || 0) > 0
+    );
 
     return (
       <aside id="right">
@@ -631,8 +715,13 @@ export default function PokerControls({
                   <div>
                     <b style={{ color: idx === 0 ? '#5eead4' : '#38bdf8' }}>{pot.name}: {money(pot.amount)}</b>
                     <div className="mut" style={{ fontSize: 10 }}>
-                      Eligible: {pot.eligiblePlayerIds.map(id => players.find(p => p.id === id)?.name || id).join(', ')}
+                      Eligible Contenders: {pot.eligiblePlayerIds.map(id => players.find(p => p.id === id)?.name || id).join(', ')}
                     </div>
+                    {foldedContributors.length > 0 && (
+                      <div style={{ fontSize: 9.5, color: '#fca5a5', marginTop: 1 }}>
+                        Dead chips from folded: {foldedContributors.map(fp => `${fp.name} (${money(round.contrib[fp.id] || 0)})`).join(', ')}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -652,7 +741,7 @@ export default function PokerControls({
                 <div style={{ fontSize: 18, fontWeight: 900 }}>{turnPlayer?.name}</div>
                 <div className="mut" style={{ fontSize: 11.5 }}>
                   {tc > 0
-                    ? `To call: ${money(tc)} (Current bet ${money(cur)})`
+                    ? `Call Latest Bet: ${money(cur)}${sc > 0 ? ` (You put in ${money(sc)} · Add ${money(tc)} to match)` : ''}`
                     : `No bet to call (Check or Bet)`}
                   {isBalMode ? ` · Stack: ${money(bal)}` : ''}
                 </div>
@@ -673,127 +762,206 @@ export default function PokerControls({
             <div
               style={{
                 marginTop: 10,
-                padding: '8px 10px',
-                borderRadius: 10,
-                background: 'rgba(245, 158, 11, 0.14)',
-                border: '1px solid rgba(245, 158, 11, 0.45)',
-                color: '#fde68a',
-                fontSize: 11.5,
-                lineHeight: 1.35,
+                padding: '10px 12px',
+                borderRadius: 12,
+                background: 'linear-gradient(135deg, rgba(239,68,68,0.22), rgba(185,28,28,0.28))',
+                border: '1.5px solid #f87171',
+                color: '#fee2e2',
+                fontSize: 12.5,
+                lineHeight: 1.4,
+                boxShadow: '0 0 16px rgba(239,68,68,0.3)',
               }}
             >
-              ⚡ Your stack ({money(bal)}) is below the call amount ({money(tc)}). Go <b>All-In</b> to contest the Main Pot while other players bet into a Side Pot!
+              ⚡ <b>Short-Stack Detected:</b> Your stack ({money(bal)}) is below call amount ({money(tc)}). Go <b>All-In</b> to play this hand and contest the Main Pot while remaining players bet into a Side Pot!
             </div>
           )}
 
-          {/* Primary One-Click Actions + Custom Raise Toggle */}
-          <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          {/* 3D Casino Clay Chips Presets Bar */}
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+              <span style={{ fontSize: 11, fontWeight: 900, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                🎰 Quick Casino Chips
+              </span>
+              {isBalMode && (
+                <span style={{ fontSize: 11.5, color: '#fcd34d', fontWeight: 800 }}>
+                  Stack: {money(bal)}
+                </span>
+              )}
+            </div>
+            <div className="casino-chips-strip">
+              {/* Call / Check Chip */}
+              <button
+                type="button"
+                className="casino-chip-item chip-red"
+                disabled={isBalMode && bal <= 0 && tc > 0}
+                title={canCheck ? 'Check (₹0)' : !canCallFull ? `All-In Call ${money(bal)}` : `Call ${money(cur)} (put in ${money(tc)})`}
+                onClick={() => {
+                  sounds.playChipSound();
+                  if (canCheck) {
+                    onAct('check');
+                  } else if (!canCallFull) {
+                    onAct('allin');
+                  } else {
+                    onAct('call');
+                  }
+                }}
+              >
+                <span className="chip-lbl">{canCheck ? 'Check' : !canCallFull ? 'All-In' : 'Call'}</span>
+                <span className="chip-val">{money(canCheck ? 0 : !canCallFull ? bal : cur)}</span>
+                {!canCheck && canCallFull && sc > 0 && (
+                  <span style={{ fontSize: 9.5, opacity: 0.9, fontWeight: 700 }}>+{money(tc)}</span>
+                )}
+              </button>
+
+              {/* Min Raise Chip */}
+              <button
+                type="button"
+                className="casino-chip-item chip-blue"
+                disabled={!canAffordMinRaise}
+                title={`Min Raise (+${money(minAddForRaise)})`}
+                onClick={() => {
+                  if (!canAffordMinRaise) return;
+                  const minRes = resolveBetAmount({
+                    amount: minAddForRaise,
+                    streetContribution: sc,
+                    currentBet: cur,
+                    minRaise: minRaiseStep,
+                    balance: isBalMode ? bal : null,
+                  });
+                  if ('error' in minRes) return;
+                  sounds.playChipSound();
+                  setBetInputStr(String(minAddForRaise));
+                  onAct(minRes.action, minRes.target);
+                }}
+              >
+                <span className="chip-lbl">Min Raise</span>
+                <span className="chip-val">+{money(minAddForRaise)}</span>
+              </button>
+
+              {/* 2x Raise Chip */}
+              <button
+                type="button"
+                className="casino-chip-item chip-green"
+                disabled={isBalMode && twoXAdd > bal}
+                title={`Raise +${money(twoXAdd)}`}
+                onClick={() => {
+                  const target = twoXAdd;
+                  const res = resolveBetAmount({
+                    amount: target,
+                    streetContribution: sc,
+                    currentBet: cur,
+                    minRaise: minRaiseStep,
+                    balance: isBalMode ? bal : null,
+                  });
+                  if ('error' in res) return;
+                  sounds.playChipSound();
+                  setBetInputStr(String(target));
+                  onAct(res.action, res.target);
+                }}
+              >
+                <span className="chip-lbl">2× Raise</span>
+                <span className="chip-val">+{money(twoXAdd)}</span>
+              </button>
+
+              {/* Pot Chip */}
+              {totalPot > 0 && (
+                <button
+                  type="button"
+                  className="casino-chip-item chip-purple"
+                  disabled={isBalMode && Math.max(minAddForRaise, totalPot) > bal}
+                  title={`Bet/Raise to Pot size (${money(Math.max(minAddForRaise, totalPot))})`}
+                  onClick={() => {
+                    const target = Math.max(minAddForRaise, totalPot);
+                    const res = resolveBetAmount({
+                      amount: target,
+                      streetContribution: sc,
+                      currentBet: cur,
+                      minRaise: minRaiseStep,
+                      balance: isBalMode ? bal : null,
+                    });
+                    if ('error' in res) return;
+                    sounds.playChipSound();
+                    setBetInputStr(String(target));
+                    onAct(res.action, res.target);
+                  }}
+                >
+                  <span className="chip-lbl">Pot</span>
+                  <span className="chip-val">{money(totalPot)}</span>
+                </button>
+              )}
+
+              {/* All-In Chip */}
+              {isBalMode && bal > 0 && (
+                <button
+                  type="button"
+                  className="casino-chip-item chip-allin"
+                  title={`Shove entire stack of ${money(bal)} All-In`}
+                  onClick={() => {
+                    sounds.playChipSound();
+                    setBetInputStr(String(bal));
+                    onAct('allin');
+                  }}
+                >
+                  <span className="chip-lbl">🚨 All-In</span>
+                  <span className="chip-val">{money(bal)}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Primary Action Hero Button */}
+          <div style={{ marginTop: 6 }}>
             {canCheck ? (
               <button
                 type="button"
-                className="pri"
-                style={{ gridColumn: '1 / -1', padding: '12px 16px', fontSize: 15, fontWeight: 900 }}
+                className="casino-hero-btn hero-chaal"
                 onClick={() => {
                   sounds.playChipSound();
                   onAct('check');
                 }}
               >
-                ✋ Check (₹0)
+                ✋ CHECK (₹0)
               </button>
             ) : isBalMode && !canCallFull ? (
               <button
                 type="button"
-                className="bad"
+                className="casino-hero-btn hero-allin"
                 disabled={bal <= 0}
-                style={{ gridColumn: '1 / -1', padding: '12px 16px', fontSize: 15, fontWeight: 900, background: 'linear-gradient(135deg,#ef4444,#b91c1c)', borderColor: '#fca5a5', color: '#fff' }}
                 onClick={() => {
                   sounds.playChipSound();
                   onAct('allin');
                 }}
               >
-                🚨 Go All-In ({money(bal)}) · Side Pot
+                🚨 GO ALL-IN ({money(bal)}) · SIDE POT
               </button>
             ) : (
               <button
                 type="button"
-                className="good"
-                style={{ gridColumn: '1 / -1', padding: '12px 16px', fontSize: 15, fontWeight: 900 }}
+                className="casino-hero-btn hero-chaal"
                 onClick={() => {
                   sounds.playChipSound();
                   onAct('call');
                 }}
               >
-                📞 Call {money(tc)}{isBalMode && tc === bal ? ' (All-In)' : ''}
+                📞 CALL {money(cur)}{sc > 0 ? ` (+${money(tc)} to match)` : ''}{isBalMode && tc === bal ? ' (ALL-IN)' : ''}
               </button>
-            )}
-
-            {!(isBalMode && !canCallFull) && (
-              <>
-                {isBalMode && !canAffordMinRaise && bal > tc ? (
-                  <button
-                    type="button"
-                    className="gold"
-                    style={{ padding: '9px 12px', fontWeight: 800, fontSize: 12.5 }}
-                    onClick={() => {
-                      sounds.playChipSound();
-                      onAct('allin');
-                    }}
-                  >
-                    🚨 All-In ({money(bal)})
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="gold"
-                    disabled={!canAffordMinRaise}
-                    style={{ padding: '9px 12px', fontWeight: 800, fontSize: 12.5 }}
-                    onClick={() => {
-                      const minRes = resolveBetAmount({
-                        amount: minAddForRaise,
-                        streetContribution: sc,
-                        currentBet: cur,
-                        minRaise: minRaiseStep,
-                        balance: isBalMode ? bal : null,
-                      });
-                      if ('error' in minRes) return;
-                      sounds.playChipSound();
-                      onAct(minRes.action, minRes.target);
-                    }}
-                  >
-                    {cur === 0 ? `💰 Bet ${money(minAddForRaise)}` : `⬆ Min Raise (+${money(minAddForRaise)})`}
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  className={showCustomRaise ? 'pri' : ''}
-                  style={{
-                    padding: '9px 12px',
-                    fontWeight: 800,
-                    fontSize: 12.5,
-                    borderColor: showCustomRaise ? 'var(--gold)' : undefined,
-                  }}
-                  onClick={() => setShowCustomRaise(prev => !prev)}
-                >
-                  {showCustomRaise ? '✕ Close Custom' : '✏️ Custom Raise'}
-                </button>
-              </>
             )}
           </div>
 
-          {/* Expandable Custom Bet / Raise Input Interface */}
-          {showCustomRaise && (
-            <div style={{ marginTop: 10, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--gold)', borderRadius: 12, padding: '10px 12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, fontSize: 12 }}>
-                <span className="mut">Enter custom bet / raise amount:</span>
-                {isBalMode && (
-                  <span style={{ color: 'var(--gold)', fontWeight: 800 }}>
-                    Stack: {money(bal)}
-                  </span>
-                )}
-              </div>
+          {/* Interactive Casino Bet Counter & Custom Raise */}
+          <div className="casino-counter-box">
+            <div className="casino-counter-header">
+              <span style={{ color: 'var(--gold)', letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 11.5 }}>
+                ✏️ Custom Bet / Raise
+              </span>
+              <span className="mut" style={{ fontSize: 11 }}>
+                Min: +{money(minAddForRaise)} {isBalMode ? `· Max: ${money(bal)}` : ''}
+              </span>
+            </div>
 
-              <div className="row" style={{ flexWrap: 'nowrap', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="casino-input-wrap" style={{ width: '100%' }}>
+                <span className="currency-sym">₹</span>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -802,111 +970,80 @@ export default function PokerControls({
                   onChange={(e) => {
                     setBetInputStr(e.target.value.replace(/[^0-9]/g, ''));
                   }}
-                  style={{ flex: 1, textAlign: 'center', fontSize: 19, fontWeight: 900 }}
                 />
-                <button
-                  type="button"
-                  className={isBetInputValid ? 'gold' : 'bad'}
-                  disabled={!isBetInputValid || betInput <= 0 || betInputStr.trim() === ''}
-                  title={!isBetInputValid ? betErrorMsg : undefined}
-                  style={{ padding: '10px 14px', whiteSpace: 'nowrap', fontWeight: 900 }}
-                  onClick={() => {
-                    if (!isBetInputValid || 'error' in resolution) return;
-                    sounds.playChipSound();
-                    onAct(resolution.action, resolution.target);
-                    setShowCustomRaise(false);
-                  }}
-                >
-                  {betInput > 0 && isBalMode && betInput === bal
-                    ? `🚨 All-In ${money(bal)}`
-                    : betInput === tc && tc > 0
-                    ? `📞 Call ${money(tc)}`
-                    : cur === 0
-                    ? `💰 Bet ${money(betInput)}`
-                    : `⬆ Raise (+${money(betInput)})`}
-                </button>
-              </div>
-
-              {!isBetInputValid && betInputStr.trim() !== '' && (
-                <div style={{ color: '#f87171', fontSize: 11.5, fontWeight: 700, marginTop: 6 }}>
-                  ⚠️ {betErrorMsg}
-                </div>
-              )}
-
-              <div className="q" style={{ marginTop: 8, marginBottom: 0 }}>
-                {[50, 100, 200, 500].map(preset => {
-                  const disabled = isBalMode && preset > bal;
-                  return (
-                    <button
-                      key={preset}
-                      type="button"
-                      className="sm"
-                      disabled={disabled}
-                      onClick={() => setBetInputStr(String(preset))}
-                    >
-                      {money(preset)}
-                    </button>
-                  );
-                })}
-                {canAffordMinRaise && (
+                {betInputStr.length > 0 && (
                   <button
                     type="button"
-                    className="sm"
-                    onClick={() => setBetInputStr(String(minAddForRaise))}
+                    className="clear-btn"
+                    title="Clear amount"
+                    onClick={() => setBetInputStr('')}
                   >
-                    Min Raise ({money(minAddForRaise)})
-                  </button>
-                )}
-                {totalPot > 0 && (!isBalMode || Math.max(minAddForRaise, totalPot) <= bal) && (
-                  <button
-                    type="button"
-                    className="sm"
-                    onClick={() => setBetInputStr(String(Math.max(minAddForRaise, totalPot)))}
-                  >
-                    Pot ({money(Math.max(minAddForRaise, totalPot))})
-                  </button>
-                )}
-                {isBalMode && bal > 0 && (
-                  <button
-                    type="button"
-                    className="sm"
-                    style={{ borderColor: '#ef4444', color: '#fca5a5' }}
-                    onClick={() => setBetInputStr(String(bal))}
-                  >
-                    🚨 All-In ({money(bal)})
+                    ✕
                   </button>
                 )}
               </div>
-            </div>
-          )}
 
-          {/* Fold & Mutual Show Request */}
-          <div className="acts" style={{ marginTop: 10 }}>
-            {!mutualReq && activePlayerIds.length >= 2 && onRequestMutualShow && (
               <button
                 type="button"
-                style={{
-                  background: 'rgba(16, 185, 129, 0.14)',
-                  borderColor: '#10b981',
-                  color: '#6ee7b7',
-                  fontWeight: 800,
+                className={isBetInputValid ? (isBalMode && betInput === bal ? 'gold' : 'pri') : 'bad'}
+                disabled={!isBetInputValid || betInput <= 0 || betInputStr.trim() === ''}
+                style={{ width: '100%', padding: '10px 16px', fontWeight: 900, fontSize: 14 }}
+                onClick={() => {
+                  if (!isBetInputValid || 'error' in resolution) return;
+                  sounds.playChipSound();
+                  onAct(resolution.action, resolution.target);
                 }}
-                onClick={onRequestMutualShow}
               >
-                🤝 Mutual Show (₹0)
+                {betInput > 0 && isBalMode && betInput === bal
+                  ? `🚨 All-In ${money(bal)}`
+                  : betInput === tc && tc > 0
+                    ? `📞 Call ${money(cur)}${sc > 0 ? ` (+${money(tc)})` : ''}`
+                    : cur === 0
+                      ? `💰 Bet ${money(betInput)}`
+                      : `⬆ Raise to ${money(cur + betInput)} (+${money(betInput)})`}
               </button>
-            )}
+            </div>
 
+            {!isBetInputValid && betInputStr.trim() !== '' && (
+              <div style={{ color: '#f87171', fontSize: 11.5, fontWeight: 700, marginTop: 6 }}>
+                ⚠️ {betErrorMsg}
+              </div>
+            )}
+          </div>
+
+          {/* Fold & Mutual Show Request */}
+          <div className="acts" style={{ marginTop: 12 }}>
             <button
+              type="button"
               className="bad"
-              style={!mutualReq && activePlayerIds.length >= 2 && onRequestMutualShow ? undefined : { gridColumn: '1 / -1' }}
+              style={{ padding: '12px 14px', fontSize: 14.5, fontWeight: 900 }}
               onClick={() => {
                 sounds.playFoldSound();
                 onAct('fold');
               }}
             >
-              🏳 Fold
+              🏳 Fold Hand
             </button>
+
+            {!mutualReq && activePlayerIds.length >= 2 && onRequestMutualShow ? (
+              <button
+                type="button"
+                style={{
+                  padding: '12px 14px',
+                  background: 'rgba(16, 185, 129, 0.16)',
+                  borderColor: '#10b981',
+                  color: '#6ee7b7',
+                  fontSize: 13,
+                  fontWeight: 900,
+                  borderRadius: 14,
+                }}
+                onClick={onRequestMutualShow}
+              >
+                🤝 Mutual Show (₹0)
+              </button>
+            ) : (
+              <div />
+            )}
           </div>
         </div>
 
@@ -917,6 +1054,9 @@ export default function PokerControls({
 
   /* ───────── Case 4: Showdown Phase ───────── */
   const activeRoundPlayers = players.filter(p => round.parts.includes(p.id) && !round.folded[p.id]);
+  const foldedRoundContributors = players.filter(
+    p => round.parts.includes(p.id) && round.folded[p.id] && (round.contrib[p.id] || 0) > 0
+  );
   const hasSidePots = pots.length > 1;
   const allPotsHaveWinners = pots.every(p => p.amount <= 0 || (potWinnersState[p.id] || []).length > 0);
 
@@ -1001,6 +1141,22 @@ export default function PokerControls({
             })}
           </div>
 
+          {foldedRoundContributors.length > 0 && (
+            <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px dashed rgba(255,255,255,0.12)' }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#f87171', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+                🏳️ Folded Players (Contributed Chips to Pot)
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {foldedRoundContributors.map(fp => (
+                  <div key={fp.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#cbd5e1' }}>
+                    <span>{fp.name} (Folded)</span>
+                    <b style={{ color: '#fca5a5' }}>Forfeited {money(round.contrib[fp.id] || 0)}</b>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={{ marginTop: 10 }}>
             {renderOnlineReadyAndRequests()}
           </div>
@@ -1038,10 +1194,10 @@ export default function PokerControls({
           {hasSidePots
             ? 'Side pots formed! Select winner(s) for each pot independently.'
             : activeRoundPlayers.length === 1
-            ? 'Everyone else folded! Confirm to award the pot.'
-            : isOnline
-            ? 'All active hands revealed and evaluated! Admin can confirm & settle the pot.'
-            : 'Tap the winner(s). Tap several for a split pot.'}
+              ? 'Everyone else folded! Confirm to award the pot.'
+              : isOnline
+                ? 'All active hands revealed and evaluated! Admin can confirm & settle the pot.'
+                : 'Tap the winner(s). Tap several for a split pot.'}
         </p>
 
         {hasSidePots ? (

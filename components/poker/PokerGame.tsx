@@ -11,6 +11,7 @@ import GoogleConfigModal from '@/components/common/GoogleConfigModal';
 import ConfirmModal from '@/components/common/ConfirmModal';
 import JoinRoomModal from '@/components/common/JoinRoomModal';
 import OperatorModals from '@/components/common/OperatorModals';
+import LiveChat from '@/components/common/LiveChat';
 import PokerTable from '@/components/poker/PokerTable';
 import PokerControls from '@/components/poker/PokerControls';
 import { useGameEngine } from '@/hooks/useGameEngine';
@@ -184,6 +185,7 @@ export default function PokerGame() {
         onTriggerDisconnect={engine.triggerGoDisconnect}
         onCheckTimeout={engine.checkGoTimeout}
         onOpenDebtModal={() => engine.setShowDebtModal(true)}
+        onKickPlayer={engine.removePlayer}
       />
 
       <main>
@@ -239,6 +241,7 @@ export default function PokerGame() {
           dealerIdx={gameState.dealerIdx ?? 0}
           readyPlayers={gameState.readyPlayers}
           onToggleReady={engine.toggleReady}
+          onSitToggle={engine.toggleSit}
           onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
           onSetBlinds={engine.setBlinds}
           onStartRound={engine.startRound}
@@ -261,6 +264,15 @@ export default function PokerGame() {
 
       <RoundHistory history={gameState.hist} />
 
+      {sessionMode === 'online' && engine.sessionId && (
+        <LiveChat
+          messages={gameState.chatMessages || []}
+          myPlayerId={myPlayer?.id || null}
+          isGameOperator={Boolean(gameState.isGameOperator)}
+          onSend={engine.sendChatMessage}
+        />
+      )}
+
       {/* Modals */}
       {engine.confirmModal && (
         <ConfirmModal
@@ -280,6 +292,7 @@ export default function PokerGame() {
           debts={gameState.debts}
           myPlayerId={myPlayer?.id || null}
           isHost={isHost}
+          sessionMode={sessionMode}
           onClose={() => engine.setShowDebtModal(false)}
           onSettle={engine.settleDebt}
           onSettleAll={engine.settleAllDebts}

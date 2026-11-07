@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { HistEntry, esc, money } from '@/types/game';
+import { HistEntry, money } from '@/types/game';
 
 interface RoundHistoryProps {
   history: HistEntry[];
@@ -47,13 +47,17 @@ export default function RoundHistory({ history }: RoundHistoryProps) {
                       Pot {money(roundPot)}
                     </span>
                   </div>
-                  <div className="hw">🏆 {esc(x.winner)}</div>
+                  <div className="hw">
+                    🏆 {x.winner ? String(x.winner).replace(/&amp;/g, '&') : 'Winner'}
+                  </div>
                   <div className="hg pos">
                     +{money(x.got !== undefined ? x.got : roundPot)}{' '}
                     <span style={{ fontSize: 10.5, opacity: 0.7, fontWeight: 600 }}>net</span>
                   </div>
                   <div className="mut" style={{ fontSize: 11, marginTop: 4, lineHeight: 1.3 }}>
-                    {(x.pays || []).map(p => `${esc(p.name)} −${money(p.amt)}`).join(' · ')}
+                    {(x.pays || [])
+                      .map(p => `${p.name ? String(p.name).replace(/&amp;/g, '&') : p.name} −${money(p.amt)}`)
+                      .join(' · ')}
                   </div>
                 </div>
               );

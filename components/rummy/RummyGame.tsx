@@ -11,6 +11,7 @@ import GoogleConfigModal from '@/components/common/GoogleConfigModal';
 import ConfirmModal from '@/components/common/ConfirmModal';
 import JoinRoomModal from '@/components/common/JoinRoomModal';
 import OperatorModals from '@/components/common/OperatorModals';
+import LiveChat from '@/components/common/LiveChat';
 import RummyTable from '@/components/rummy/RummyTable';
 import RummyControls from '@/components/rummy/RummyControls';
 import RummyConfigModal from '@/components/rummy/RummyConfigModal';
@@ -228,6 +229,7 @@ export default function RummyGame() {
         onTriggerDisconnect={engine.triggerGoDisconnect}
         onCheckTimeout={engine.checkGoTimeout}
         onOpenDebtModal={() => engine.setShowDebtModal(true)}
+        onKickPlayer={engine.removePlayer}
       />
 
       <main id="app">
@@ -291,6 +293,7 @@ export default function RummyGame() {
           isHost={isHost}
           readyPlayers={gameState.readyPlayers}
           onToggleReady={engine.toggleReady}
+          onSitToggle={engine.toggleSit}
           onOpenAddMoney={(id) => engine.setAddMoneyTarget(id)}
           onSetPointValue={setPointValue}
           onSetDefaultBuyIn={engine.setDefaultBuyIn}
@@ -307,6 +310,15 @@ export default function RummyGame() {
       </main>
 
       <RoundHistory history={gameState.hist} />
+
+      {sessionMode === 'online' && engine.sessionId && (
+        <LiveChat
+          messages={gameState.chatMessages || []}
+          myPlayerId={myPlayer?.id || null}
+          isGameOperator={Boolean(gameState.isGameOperator)}
+          onSend={engine.sendChatMessage}
+        />
+      )}
 
       {/* Modals */}
       {showConfigModal && (
@@ -335,6 +347,7 @@ export default function RummyGame() {
           debts={gameState.debts}
           myPlayerId={myPlayer?.id || null}
           isHost={isHost}
+          sessionMode={sessionMode}
           onClose={() => engine.setShowDebtModal(false)}
           onSettle={engine.settleDebt}
           onSettleAll={engine.settleAllDebts}

@@ -127,9 +127,9 @@ export function sanitizeStateForClient(
   const isTeenPatti = sanitized.gameType === 'tp';
   const isBlackjack = sanitized.gameType === 'bj';
 
-  // Sanitize Blackjack dealer hole card until dealer turn / result (Game Operator sees everything)
+  // Sanitize Blackjack dealer hole card until dealer turn / result (hidden from all including Game Operator)
   if (isBlackjack && Array.isArray(sanitized.round?.dealerHand) && sanitized.round.dealerHand.length >= 2) {
-    if (!isGameOperator && !sanitized.round.dealerHoleRevealed && !isShowdown) {
+    if (!sanitized.round.dealerHoleRevealed && !isShowdown) {
       sanitized.round.dealerHand = [
         sanitized.round.dealerHand[0],
         { rank: '?', suit: '🎴', red: false, hidden: true, masked: true },
@@ -137,7 +137,7 @@ export function sanitizeStateForClient(
     }
   }
 
-  // Sanitize player hands (Game Operator observes all hands unmasked)
+  // Sanitize player hands (Admin / Game Operator must NOT see other players' hidden cards)
   if (sanitized.round?.hands) {
     const clientHands: Record<string, any> = {};
     const revealedHands = sanitized.round.revealedHands || {};
@@ -149,8 +149,10 @@ export function sanitizeStateForClient(
       const isOwnHand = playerId === requestingPlayerId;
       const isBlindInTP = isTeenPatti && (playerStatus[playerId] || 'blind') === 'blind' && !isPubliclyRevealed;
 
-      // Game Operator sees all hands; in Blackjack all player hands are face-up
-      if (isGameOperator || isBlackjack || isPubliclyRevealed || (isOwnHand && !isBlindInTP)) {
+      // In Blackjack all seated player hands are face-up on table (casino rule).
+      // In Poker & Teen Patti, only own hand (when seen) or publicly revealed/showdown hands are visible.
+      // Admin / Game Operator does NOT see everyone's cards!
+      if (isBlackjack || isPubliclyRevealed || (isOwnHand && !isBlindInTP)) {
         clientHands[playerId] = cards;
       } else {
         clientHands[playerId] = {
@@ -161,6 +163,17 @@ export function sanitizeStateForClient(
       }
     }
     sanitized.round.hands = clientHands;
+
+    // Mask hand evaluations if the hand itself is masked
+    if (sanitized.round.handEvaluations) {
+      const clientEvals: Record<string, any> = {};
+      for (const [playerId, ev] of Object.entries(sanitized.round.handEvaluations)) {
+        if (!clientHands[playerId]?.masked) {
+          clientEvals[playerId] = ev;
+        }
+      }
+      sanitized.round.handEvaluations = clientEvals;
+    }
   }
 
   return sanitized;

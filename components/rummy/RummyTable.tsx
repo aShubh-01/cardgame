@@ -234,6 +234,7 @@ export default function RummyTable({
         const isBusted = isBalMode && (pl.balance || 0) <= 0;
         const totalPts = cumulativePoints[pl.id] || 0;
         const isSpectator = round && !inR && !pl.sit && !isBusted;
+        const isDisconnected = isOnline && pl.isConnected === false;
         const isRoundActive = Boolean(round && !round.settled && round.phase !== 'result');
         const canShowChipBtn = !isRoundActive && isBalMode && (!isOnline || isHost || pl.id === myPlayerId);
 
@@ -242,14 +243,19 @@ export default function RummyTable({
         return (
           <div
             key={pl.id}
-            className={`seat ${turn ? 'turn' : ''} ${win ? 'win' : ''} ${isSpectator ? 'spectating' : ''} ${!inR && round && !isSpectator ? 'fold' : ''} ${isBusted && !inR ? 'busted' : ''}`}
+            className={`seat ${turn ? 'turn' : ''} ${win ? 'win' : ''} ${isSpectator ? 'spectating' : ''} ${!inR && round && !isSpectator ? 'fold' : ''} ${isBusted && !inR ? 'busted' : ''} ${isDisconnected ? 'offline' : ''}`}
             data-seat={pl.id}
             style={{
               left: `calc(50% + (50% - var(--sx)) * ${x})`,
               top: `calc(50% + (50% - var(--sy)) * ${y})`,
             }}
           >
-            {turn && <div className="tg">▼ PLAYING NOW</div>}
+            {isDisconnected && (
+              <div className="tg" style={{ background: '#4b5563', color: '#fff', borderColor: '#9ca3af' }}>
+                🔌 OFFLINE
+              </div>
+            )}
+            {turn && !isDisconnected && <div className="tg">▼ PLAYING NOW</div>}
             {win && <div className="crown">👑</div>}
 
             {isSpectator ? (
@@ -318,7 +324,17 @@ export default function RummyTable({
             </div>
             <div className="sn">{pl.name}</div>
             <div className="sa" style={{ fontSize: 11, color: 'var(--mut)' }}>
-              {round ? (win ? 'DECLARED SHOW!' : inR ? 'Playing' : 'Sitting out') : pl.sit ? 'Sitting out' : 'Ready'}
+              {isDisconnected
+                ? '🔌 Offline'
+                : round
+                ? win
+                  ? 'DECLARED SHOW!'
+                  : inR
+                  ? 'Playing'
+                  : 'Sitting out'
+                : pl.sit
+                ? 'Sitting out'
+                : 'Ready'}
             </div>
 
             {/* Virtual Rummy Cards Count */}

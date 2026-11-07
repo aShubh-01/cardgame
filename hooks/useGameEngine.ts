@@ -303,23 +303,51 @@ export function useGameEngine(initialGameType: GType) {
     return null;
   };
 
-  // Notify server immediately if Game Operator closes/leaves tab
+  // Notify server immediately when any online participant (player or Game Operator) closes/leaves the tab
   useEffect(() => {
-    if (!sessionId || currentSessionDoc?.sessionMode !== 'online' || !gameState.isGameOperator) return;
+    if (!sessionId || currentSessionDoc?.sessionMode !== 'online') return;
     const handleBeforeUnload = () => {
       try {
-        const blob = new Blob([JSON.stringify({ action: 'GO_DISCONNECT' })], { type: 'application/json' });
+        const blob = new Blob([JSON.stringify({ action: 'PLAYER_DISCONNECT' })], { type: 'application/json' });
         navigator.sendBeacon(`/api/sessions/${sessionId}/action`, blob);
       } catch {
-        // fallback handled by 9s server heartbeat timeout
+        // fallback handled by server heartbeat timeout
       }
     };
+    window.addEventListener('pagehide', handleBeforeUnload);
     window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [sessionId, currentSessionDoc?.sessionMode, gameState.isGameOperator]);
+    return () => {
+      window.removeEventListener('pagehide', handleBeforeUnload);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [sessionId, currentSessionDoc?.sessionMode]);
 
-  const toggleReady = async () => {
-    await sendMultiplayerAction('TOGGLE_READY');
+  const sendChatMessage = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    await sendMultiplayerAction('SEND_CHAT', { text: trimmed.slice(0, 240) });
+  };
+
+  const toggleReady = async (betAmount?: number) => {
+    const validBet =
+      typeof betAmount === 'number' && Number.isFinite(betAmount) && betAmount > 0
+        ? betAmount
+        : undefined;
+    await sendMultiplayerAction('TOGGLE_READY', validBet !== undefined ? { betAmount: validBet } : {});
+  };
+
+  const setPlayerBet = async (betAmount: number, targetPlayerId?: string) => {
+    if (sessionIdRef.current && currentSessionDoc?.sessionMode === 'online') {
+      await sendMultiplayerAction('SET_PLAYER_BET', { betAmount, targetPlayerId });
+      return;
+    }
+    updateState(prev => ({
+      ...prev,
+      playerBets: {
+        ...(prev.playerBets || {}),
+        [targetPlayerId || prev.players[0]?.id || 'p1']: betAmount,
+      },
+    }));
   };
 
   const openPreRoundLobby = async () => {
@@ -437,6 +465,10 @@ export function useGameEngine(initialGameType: GType) {
   };
 
   const removePlayer = (id: string) => {
+    if (currentSessionDoc?.sessionMode === 'online') {
+      sendMultiplayerAction('KICK_PLAYER', { targetPlayerId: id });
+      return;
+    }
     updateState(prev => {
       if (prev.round) return prev; // Cannot remove during active round
       return {
@@ -447,8 +479,11 @@ export function useGameEngine(initialGameType: GType) {
   };
 
   const toggleSit = (id: string) => {
+    if (sessionIdRef.current) {
+      sendMultiplayerAction('TOGGLE_SIT', { targetPlayerId: id }).catch(console.error);
+    }
     updateState(prev => {
-      if (prev.round) return prev;
+      if (prev.round && !prev.round.settled && prev.round.phase !== 'result') return prev;
       return {
         ...prev,
         players: prev.players.map(p => (p.id === id ? { ...p, sit: !p.sit } : p)),
@@ -670,6 +705,11 @@ export function useGameEngine(initialGameType: GType) {
 
       if (gameTypeRef.current === 'pk') {
         const dIdx = prev.dealerIdx ?? 0;
+        const bootMode = prev.ante?.mode === 'admin' ? 'admin' : 'each';
+        const bootAmt = Math.max(0, prev.ante?.amt || 0);
+        const antePerPlayer = bootMode === 'admin' && bootAmt > 0
+          ? Math.max(1, Math.floor(bootAmt / activeIds.length) || 1)
+          : Math.max(1, bootAmt || 5);
         const started = startOnlinePokerRound({
           players: prev.players,
           rno,
@@ -678,7 +718,7 @@ export function useGameEngine(initialGameType: GType) {
           hands: {},
           boardCards: [],
           deck: [],
-          minBet: Math.max(10, prev.ante?.mode !== 'admin' && (prev.ante?.amt || 0) > 0 ? prev.ante.amt : 10),
+          minBet: antePerPlayer,
           ante: prev.ante,
           adminPlayerId: activePlayers[0]?.id,
         });
@@ -700,10 +740,10 @@ export function useGameEngine(initialGameType: GType) {
         const bootMode = prev.ante?.mode === 'admin' ? 'admin' : 'each';
         const bootAmt = Math.max(0, prev.ante?.amt || 0);
         const baseStake = Math.max(
-          10,
+          1,
           bootMode === 'admin' && bootAmt > 0
-            ? Math.max(10, Math.floor(bootAmt / activeIds.length) || 10)
-            : bootAmt || 10
+            ? Math.max(1, Math.floor(bootAmt / activeIds.length) || 1)
+            : bootAmt || 5
         );
 
         const rd: Round = {
@@ -714,6 +754,8 @@ export function useGameEngine(initialGameType: GType) {
           folded: {},
           turn: activeIds[0],
           stake: baseStake,
+          lastBetAmt: 0,
+          lastIsBlind: true,
           stack: [],
           log: ['All players start BLIND 🙈'],
           lastBy: '',
@@ -897,11 +939,13 @@ export function useGameEngine(initialGameType: GType) {
     isRaiseOpen,
     setIsRaiseOpen,
     toggleReady,
+    setPlayerBet,
     openPreRoundLobby,
     transferGameOperator,
     volunteerGameOperator,
     triggerGoDisconnect,
     checkGoTimeout,
+    sendChatMessage,
     setBjDealer,
     requestBjDealer,
     resolveBjDealerRequest,

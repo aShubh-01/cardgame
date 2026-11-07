@@ -25,6 +25,7 @@ interface RummyControlsProps {
   isHost?: boolean;
   readyPlayers?: Record<string, boolean>;
   onToggleReady?: () => void;
+  onSitToggle?: (id: string) => void;
   onOpenAddMoney?: (id: string) => void;
   onSetPointValue: (val: number) => void;
   onSetDefaultBuyIn: (amt: number) => void;
@@ -51,6 +52,7 @@ export default function RummyControls({
   isHost = true,
   readyPlayers = {},
   onToggleReady,
+  onSitToggle,
   onOpenAddMoney,
   onSetPointValue,
   onSetDefaultBuyIn,
@@ -66,7 +68,7 @@ export default function RummyControls({
 }: RummyControlsProps) {
   const isBalMode = !!balanceMode;
   const isOnline = sessionMode === 'online';
-  const seated = players.filter(p => !p.sit);
+  const seated = players.filter(p => !p.sit && !p.isGameOperator && (!isOnline || p.isConnected !== false));
 
   const [selectedWinnerId, setSelectedWinnerId] = useState<string>('');
   const [pointsInput, setPointsInput] = useState<Record<string, number>>({});
@@ -89,6 +91,10 @@ export default function RummyControls({
 
   const renderOnlineReadyAndRequests = () => {
     if (!isOnline) return null;
+    const allTablePlayers = players.filter(p => !p.isGameOperator);
+    const mePlayer = players.find(p => p.id === myPlayerId);
+    const isMeSitting = Boolean(mePlayer?.sit);
+
     return (
       <div
         style={{
@@ -109,8 +115,35 @@ export default function RummyControls({
         </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: myPlayerId ? 10 : 0 }}>
-          {seated.map(p => {
+          {allTablePlayers.map(p => {
+            const isDisconnected = p.isConnected === false;
+            const isSitting = Boolean(p.sit);
             const rdy = Boolean(readyPlayers[p.id]);
+
+            let statusLabel = '⏳ ';
+            let statusText = p.name;
+            let bg = 'rgba(255,255,255,0.06)';
+            let border = 'rgba(255,255,255,0.15)';
+            let color = 'var(--mut)';
+
+            if (isDisconnected) {
+              statusLabel = '🔌 ';
+              statusText = `${p.name} (Offline · Auto-skipped)`;
+              border = 'rgba(239, 68, 68, 0.45)';
+              color = '#fca5a5';
+            } else if (isSitting) {
+              statusLabel = '⏸ ';
+              statusText = `${p.name} (Skipping / Sitting)`;
+              border = 'rgba(251, 191, 36, 0.45)';
+              color = '#fde68a';
+            } else if (rdy) {
+              statusLabel = '👍 ';
+              statusText = `${p.name} (Ready)`;
+              bg = 'rgba(34, 197, 94, 0.18)';
+              border = 'rgba(74, 222, 128, 0.5)';
+              color = '#4ade80';
+            }
+
             return (
               <span
                 key={p.id}
@@ -119,38 +152,78 @@ export default function RummyControls({
                   padding: '3px 8px',
                   borderRadius: 999,
                   fontWeight: 800,
-                  background: rdy ? 'rgba(34, 197, 94, 0.18)' : 'rgba(255,255,255,0.06)',
-                  border: `1px solid ${rdy ? 'rgba(74, 222, 128, 0.5)' : 'rgba(255,255,255,0.15)'}`,
-                  color: rdy ? '#4ade80' : 'var(--mut)',
+                  background: bg,
+                  border: `1px solid ${border}`,
+                  color,
                 }}
               >
-                {rdy ? '👍 ' : '⏳ '}{p.name}
+                {statusLabel}{statusText}
               </span>
             );
           })}
         </div>
 
         {myPlayerId && !isHost && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            {onToggleReady && (
-              <button
-                type="button"
-                className={myReady ? 'good' : 'gold'}
-                style={{ flex: 1, padding: '9px 12px', fontWeight: 900, fontSize: 13 }}
-                onClick={onToggleReady}
-              >
-                {myReady ? '👍 Ready! (Click to Unready)' : '👍 Ready for Next Deal'}
-              </button>
-            )}
-            {isBalMode && onOpenAddMoney && (
-              <button
-                type="button"
-                className="sm"
-                style={{ padding: '9px 12px', fontWeight: 800, fontSize: 12.5 }}
-                onClick={() => onOpenAddMoney(myPlayerId)}
-              >
-                🪙 Request Chips
-              </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {isMeSitting ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontSize: 12, color: '#fde68a', textAlign: 'center', background: 'rgba(251, 191, 36, 0.12)', padding: '6px 10px', borderRadius: 8 }}>
+                  ⏸ You are skipping the next deal (sitting out).
+                </div>
+                {onSitToggle && (
+                  <button
+                    type="button"
+                    className="pri"
+                    style={{ width: '100%', padding: '9px 12px', fontWeight: 900, fontSize: 13 }}
+                    onClick={() => onSitToggle(myPlayerId)}
+                  >
+                    ▶️ Rejoin Next Deal
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {onToggleReady && (
+                    <button
+                      type="button"
+                      className={myReady ? 'good' : 'gold'}
+                      style={{ flex: 1, padding: '9px 12px', fontWeight: 900, fontSize: 13 }}
+                      onClick={() => onToggleReady()}
+                    >
+                      {myReady ? '👍 Ready! (Click to Unready)' : '👍 Ready for Next Deal'}
+                    </button>
+                  )}
+                  {isBalMode && onOpenAddMoney && (
+                    <button
+                      type="button"
+                      className="sm"
+                      style={{ padding: '9px 12px', fontWeight: 800, fontSize: 12.5 }}
+                      onClick={() => onOpenAddMoney(myPlayerId)}
+                    >
+                      🪙 Request Chips
+                    </button>
+                  )}
+                </div>
+                {onSitToggle && (
+                  <button
+                    type="button"
+                    className="sm mut"
+                    style={{
+                      width: '100%',
+                      padding: '7px 12px',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '1px dashed rgba(255,255,255,0.2)',
+                      color: '#cbd5e1',
+                    }}
+                    onClick={() => onSitToggle(myPlayerId)}
+                  >
+                    ⏸ Skip Next Deal / Sit Out
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}

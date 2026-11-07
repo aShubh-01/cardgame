@@ -132,8 +132,8 @@ export function syncGameOperatorPresence(sessionDoc: any, requestingUserEmail?: 
   const now = Date.now();
   const isRoundActive = Boolean(
     sessionDoc.round &&
-      !sessionDoc.round.settled &&
-      sessionDoc.round.phase !== 'result'
+    !sessionDoc.round.settled &&
+    sessionDoc.round.phase !== 'result'
   );
 
   // Track per-player connection status & heartbeat across all seated players
@@ -179,6 +179,7 @@ export function syncGameOperatorPresence(sessionDoc: any, requestingUserEmail?: 
 
   if (reqEmail && reqEmail === activeGoEmail) {
     sessionDoc.goLastHeartbeat = now;
+    sessionDoc.goDisconnectedAt = 0;
     if (sessionDoc.goDisconnectEvent && sessionDoc.goDisconnectEvent.status === 'volunteering') {
       sessionDoc.goDisconnectEvent = null;
       appendActivityLog(sessionDoc, '🟢 Game Operator reconnected');
@@ -188,27 +189,38 @@ export function syncGameOperatorPresence(sessionDoc: any, requestingUserEmail?: 
     }
     dirty = true;
   } else {
-    // Check if GO heartbeat timed out (> 9 seconds) and no volunteer event is active yet
+    // Check if GO heartbeat timed out (1 minute grace period) and no volunteer event is active yet
     const lastBeat = sessionDoc.goLastHeartbeat || 0;
     const eligiblePlayers = (sessionDoc.players || []).filter(
       (p: any) => p.userId && p.userId.toLowerCase().trim() !== activeGoEmail && !p.isGameOperator
     );
 
+    // Record when Game Operator first stopped heartbeating
+    if (lastBeat > 0 && now - lastBeat > 10000 && !sessionDoc.goDisconnectedAt) {
+      sessionDoc.goDisconnectedAt = lastBeat;
+      dirty = true;
+    }
+
+    // Wait at least 1 minute (60,000ms) before triggering the volunteer alert
+    const disconnectedDuration = sessionDoc.goDisconnectedAt
+      ? now - sessionDoc.goDisconnectedAt
+      : (lastBeat > 0 ? now - lastBeat : 0);
+
     if (
-      lastBeat > 0 &&
-      now - lastBeat > 9000 &&
+      (lastBeat > 0 || (sessionDoc.goDisconnectedAt && sessionDoc.goDisconnectedAt > 0)) &&
+      disconnectedDuration >= 60000 &&
       !sessionDoc.goDisconnectEvent &&
       !sessionDoc.nextGameOperatorUserId &&
       eligiblePlayers.length > 0
     ) {
       sessionDoc.goDisconnectEvent = {
-        disconnectedAt: now,
+        disconnectedAt: sessionDoc.goDisconnectedAt || now,
         expiresAt: now + 15000,
         status: 'volunteering',
         volunteerUserId: null,
         volunteerName: null,
       };
-      appendActivityLog(sessionDoc, '⚠️ Game Operator disconnected · 15s volunteer prompt sent to all players');
+      appendActivityLog(sessionDoc, '⚠️ Game Operator offline for >1 minute · 15s volunteer prompt sent to all players');
       if (typeof sessionDoc.markModified === 'function') {
         sessionDoc.markModified('goDisconnectEvent');
       }

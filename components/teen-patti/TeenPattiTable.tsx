@@ -37,7 +37,7 @@ export default function TeenPattiTable({
   const [spinSteps, setSpinSteps] = useState(0);
 
   const { pots, totalPot: potTotal } = round
-    ? calculatePots(round.contrib || {}, round.folded || {})
+    ? calculatePots(round.contrib || {}, round.folded || {}, round.allIn || {})
     : { pots: [], totalPot: 0 };
 
   const activePlayers = round
@@ -78,7 +78,15 @@ export default function TeenPattiTable({
           <div className="center">
             {round && round.phase === 'bet' && round.stake > 0 && (
               <div className="last">
-                STAKE <b>{money(round.stake)}</b> {round.lastBy && <small>last by {round.lastBy}</small>}
+                {round.lastBetAmt ? (
+                  <>
+                    BET <b>{money(round.lastBetAmt)}</b> {round.lastBy && <small>by {round.lastBy} {round.lastIsBlind ? '(Blind)' : '(Seen)'}</small>}
+                  </>
+                ) : (
+                  <>
+                    STAKE <b>{money(round.stake)}</b> {round.lastBy && <small>last by {round.lastBy}</small>}
+                  </>
+                )}
               </div>
             )}
 
@@ -137,10 +145,13 @@ export default function TeenPattiTable({
         const isPickable = !isOnline && round && round.phase === 'result' && inR && !f && isHost;
         const isBusted = isBalMode && (pl.balance || 0) <= 0;
         const isSpectator = round && !inR && !pl.sit && !isBusted;
+        const isDisconnected = isOnline && pl.isConnected === false;
 
         let sa = '';
         if (round) {
-          sa = isSpectator
+          sa = isDisconnected
+            ? '🔌 Offline'
+            : isSpectator
             ? '⏳ Next hand'
             : !inR
             ? isBusted
@@ -152,7 +163,7 @@ export default function TeenPattiTable({
             ? `ALL-IN (${money(round.contrib[pl.id] || 0)})`
             : money(round.contrib[pl.id] || 0);
         } else {
-          sa = isBusted ? '💥 Busted (₹0) · Paused' : pl.sit ? 'Sitting out' : 'Ready';
+          sa = isDisconnected ? '🔌 Disconnected' : isBusted ? '💥 Busted (₹0) · Paused' : pl.sit ? 'Sitting out' : 'Ready';
         }
 
         const col = COL[i % COL.length];
@@ -168,7 +179,7 @@ export default function TeenPattiTable({
         return (
           <div
             key={pl.id}
-            className={`seat ${turn ? 'turn' : ''} ${isSpectator ? 'spectating' : ''} ${f || (round && !inR && !isSpectator) || (!round && pl.sit) || (isBusted && !inR) ? 'fold' : ''} ${isAllIn ? 'allin' : ''} ${isBusted && !inR ? 'busted' : ''} ${win ? 'win' : ''} ${isPickable ? 'pick' : ''}`}
+            className={`seat ${turn ? 'turn' : ''} ${isSpectator ? 'spectating' : ''} ${f || (round && !inR && !isSpectator) || (!round && pl.sit) || (isBusted && !inR) ? 'fold' : ''} ${isAllIn ? 'allin' : ''} ${isBusted && !inR ? 'busted' : ''} ${isDisconnected ? 'offline' : ''} ${win ? 'win' : ''} ${isPickable ? 'pick' : ''}`}
             data-seat={pl.id}
             style={{
               left: `calc(50% + (50% - var(--sx)) * ${x})`,
@@ -178,6 +189,11 @@ export default function TeenPattiTable({
               if (isPickable && onPickWinner) onPickWinner(pl.id);
             }}
           >
+            {isDisconnected && (
+              <div className="tg" style={{ background: '#4b5563', color: '#fff', borderColor: '#9ca3af' }}>
+                🔌 OFFLINE
+              </div>
+            )}
             {inR && !f && round.phase === 'bet' && (
               <span
                 style={{
@@ -244,8 +260,34 @@ export default function TeenPattiTable({
             <div className={`sa ${isBusted ? 'neg' : ''}`}>{sa}</div>
 
             {/* Virtual 3-Card Hand */}
-            {handData && inR && !f && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 4, gap: 3 }}>
+            {handData && inR && (!f || pl.id === myPlayerId) && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  marginTop: 4,
+                  gap: 3,
+                  opacity: f ? 0.65 : 1,
+                  filter: f ? 'grayscale(40%)' : 'none',
+                }}
+              >
+                {f && (
+                  <span
+                    style={{
+                      fontSize: 8.5,
+                      fontWeight: 800,
+                      color: '#f87171',
+                      background: 'rgba(239, 68, 68, 0.22)',
+                      border: '1px solid rgba(239, 68, 68, 0.4)',
+                      padding: '1px 6px',
+                      borderRadius: 4,
+                      letterSpacing: 0.5,
+                    }}
+                  >
+                    FOLDED
+                  </span>
+                )}
                 <div
                   style={{
                     display: 'flex',

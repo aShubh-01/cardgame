@@ -66,6 +66,8 @@ export interface Round {
   stack: string[];
   log: string[];
   lastBy: string;
+  lastBetAmt?: number;
+  lastIsBlind?: boolean;
   winner: string | null;
   street?: number;
   cur?: number;
@@ -131,6 +133,7 @@ export interface GameState {
   tot: { rounds: number; total: number; big: number };
   dealerIdx?: number;
   blinds?: { sb: number; bb: number };
+  playerBets?: Record<string, number>;
   rummyConfig?: any;
   chipRequests?: ChipRequest[];
   dealerRequests?: DealerRequest[];
